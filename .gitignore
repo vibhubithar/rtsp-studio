@@ -1,0 +1,7 @@
+.rtsp-state/
+.test-videos/
+*.log
+rtsp-sync.txt
+vendor/
+__pycache__/
+*.pyc

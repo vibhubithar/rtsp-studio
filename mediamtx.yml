@@ -1,0 +1,47 @@
+###############################################
+# Local MediaMTX config for folder streaming.
+# TCP-only: 4K H264 keyframes are shredded by UDP RTP
+# fragmentation and show up as a connected stream with no picture.
+###############################################
+
+logLevel: info
+logDestinations: [stdout]
+
+writeQueueSize: 1024
+
+rtsp: yes
+rtspTransports: [tcp, udp]
+rtspAddress: :8554
+rtpAddress: :8000
+rtcpAddress: :8001
+
+rtmp: yes
+hls: yes
+webrtc: yes
+srt: yes
+
+authMethod: internal
+authInternalUsers:
+- user: any
+  pass:
+  ips: []
+  permissions:
+  - action: publish
+    path:
+  - action: read
+    path:
+  - action: playback
+    path:
+- user: any
+  pass:
+  ips: ['127.0.0.1', '::1']
+  permissions:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+pathDefaults:
+  source: publisher
+
+paths:
+  all_others:

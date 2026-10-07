@@ -1,0 +1,1841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RTSP sync scrubber</title>
+  <style>
+    :root {
+      --bg: #12140f;
+      --panel: #1c1f18;
+      --ink: #e7eadf;
+      --muted: #9aa38d;
+      --line: #32382c;
+      --accent: #c4f542;
+      --danger: #ef7a63;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #2a331c 0%, transparent 55%),
+        var(--bg);
+      color: var(--ink);
+      font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+    .lede { color: var(--muted); margin: 0 0 28px; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label.field {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    input[type="text"]:not(.stamp-part), select, input[type="datetime-local"] {
+      flex: 1;
+      min-width: 180px;
+      background: #10130c;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      color-scheme: dark;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font: 600 14px/1 "Segoe UI", system-ui, sans-serif;
+      cursor: pointer;
+      background: var(--accent);
+      color: #14180c;
+    }
+    button.ghost { background: #2a2f24; color: var(--ink); }
+    button.danger { background: var(--danger); color: #1a0c08; }
+    button.sync-on { background: #2f9e5c; color: #07140c; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .sync-saved {
+      font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #8fe0b0;
+      align-self: center;
+      min-width: 9.5ch;
+    }
+    .feeds-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .feeds-head .field { margin: 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .tile {
+      background: #0b0d08;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+    .tile.off { opacity: 0.42; }
+    .tile.reference { border-color: var(--accent); }
+    .sync-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 10px 8px;
+    }
+    .sync-tools button { padding: 6px 8px; font-size: 11px; }
+    .sync-seek {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 0 10px 6px;
+    }
+    .sync-seek input[type="range"] {
+      height: 22px;
+      margin: 0;
+      flex: 1;
+    }
+    .sync-seek .tick {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+    }
+    .stamp {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--ink);
+    }
+    .stamp input.stamp-part,
+    .stamp input[type="text"] {
+      width: 2.6ch;
+      min-width: 2.6ch;
+      max-width: 2.6ch;
+      flex: 0 0 2.6ch;
+      margin: 0;
+      padding: 2px 1px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #10130c;
+      color: inherit;
+      font: inherit;
+      text-align: center;
+    }
+    .stamp input.ms,
+    .stamp input.ms[type="text"] {
+      width: 3.8ch;
+      min-width: 3.8ch;
+      max-width: 3.8ch;
+      flex-basis: 3.8ch;
+    }
+    .stamp input:focus {
+      outline: 1px solid var(--accent);
+      border-color: var(--accent);
+    }
+    .stamp input:disabled { opacity: 0.45; }
+    .stamp .sep { color: var(--muted); padding: 0 2px; user-select: none; }
+    .clock-host .stamp { font-size: 22px; font-weight: 600; letter-spacing: -0.03em; }
+    .clock-host .stamp input.stamp-part,
+    .clock-host .stamp input[type="text"] {
+      width: 2.8ch;
+      min-width: 2.8ch;
+      max-width: 2.8ch;
+      flex-basis: 2.8ch;
+      padding: 4px 2px;
+      border-radius: 6px;
+    }
+    .clock-host .stamp input.ms,
+    .clock-host .stamp input.ms[type="text"] {
+      width: 4.2ch;
+      min-width: 4.2ch;
+      max-width: 4.2ch;
+      flex-basis: 4.2ch;
+    }
+    .seek-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .seek-row input[type="range"] { flex: 1; min-width: 0; }
+    .frame-btn {
+      flex: 0 0 auto;
+      min-width: 38px;
+      padding: 6px 8px;
+      font-size: 13px;
+      line-height: 1;
+    }
+    .sync-meta {
+      padding: 0 10px 8px;
+      font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+    }
+    .preview-wrap {
+      position: relative;
+      background: #000;
+    }
+    .tile img {
+      display: block;
+      width: 100%;
+      height: 210px;
+      object-fit: contain;
+      background: #000;
+      cursor: zoom-in;
+    }
+    .ts-overlay {
+      position: absolute;
+      z-index: 2;
+      font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #fff;
+      text-shadow: 0 0 3px #000, 0 1px 2px #000, 1px 0 2px #000, -1px 0 2px #000;
+      pointer-events: none;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .ts-overlay.top-left { top: 10px; left: 12px; }
+    .ts-overlay.bottom-left { bottom: 10px; left: 12px; }
+    .ts-overlay.top-right { top: 10px; right: 12px; }
+    .ts-overlay.bottom-right { bottom: 10px; right: 12px; }
+    .lightbox-card .ts-overlay { font-size: 20px; }
+    .lightbox-card .ts-overlay.top-left { top: 14px; left: 16px; }
+    .lightbox-card .ts-overlay.bottom-left { bottom: 14px; left: 16px; }
+    .lightbox-card .ts-overlay.top-right { top: 14px; right: 16px; }
+    .lightbox-card .ts-overlay.bottom-right { bottom: 14px; right: 16px; }
+    .overlay-opts { align-items: flex-end; margin-top: 12px; }
+    .overlay-opts .grow { flex: 1; min-width: 220px; }
+    .overlay-opts select { flex: 0 0 170px; min-width: 170px; }
+    input.jitter-sec {
+      width: 8.5ch;
+      min-width: 8.5ch;
+      flex: 0 0 auto;
+      background: #10130c;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 8px;
+      font: inherit;
+      color-scheme: dark;
+    }
+    .jitter-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .lightbox[hidden] { display: none; }
+    .lightbox-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(6, 8, 4, 0.78);
+    }
+    .lightbox-card {
+      position: relative;
+      z-index: 1;
+      width: min(1180px, 100%);
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+    }
+    .lightbox-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .lightbox-head strong {
+      font-size: 16px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .lightbox-card img {
+      display: block;
+      width: 100%;
+      max-height: min(72vh, 820px);
+      object-fit: contain;
+      background: #000;
+      border-radius: 10px;
+    }
+    .lightbox-controls { margin-top: 12px; }
+    .lightbox-controls .sync-seek { padding: 0; }
+    .lightbox-tools { margin-top: 10px; }
+    .tile .cap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+    }
+    .tile .cap span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .empty-grid { color: var(--muted); margin: 0; }
+    .trim-stamps {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      margin-bottom: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .trim-tag {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .trim-gap { color: var(--muted); padding: 0 4px; }
+    .trim-stamps .clock-host { display: inline-flex; }
+    .trim-stamps .clock-host .stamp { font-size: 16px; }
+    .trim-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .trim-bar {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      height: 28px;
+      background: #10130c;
+      border: 1px solid var(--line);
+      border-radius: 99px;
+    }
+    .trim-fill {
+      position: absolute;
+      top: 50%;
+      height: 6px;
+      margin-top: -3px;
+      background: var(--accent);
+      opacity: 0.55;
+      border-radius: 99px;
+      pointer-events: none;
+    }
+    .trim-bar input[type="range"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      margin: 0;
+      background: none;
+      pointer-events: none;
+      accent-color: var(--accent);
+      height: 28px;
+    }
+    .trim-bar input[type="range"]::-webkit-slider-thumb {
+      pointer-events: auto;
+      position: relative;
+      z-index: 2;
+    }
+    .trim-bar input[type="range"]::-moz-range-thumb {
+      pointer-events: auto;
+    }
+    .trim-bar input[type="range"].end { accent-color: #8ec8ff; z-index: 2; }
+    .trim-bar input[type="range"].start { z-index: 3; }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+      height: 28px;
+    }
+    input[type="range"].end { accent-color: #8ec8ff; }
+    body.streams-locked .tile button,
+    body.streams-locked .tile input,
+    body.streams-locked .tile .stamp {
+      pointer-events: none;
+    }
+    body.streams-locked .tile img { pointer-events: auto; }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      cursor: pointer;
+      color: var(--ink);
+      font-size: 14px;
+    }
+    .hint, .status, .error {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .error { color: var(--danger); }
+    .status.ok { color: var(--accent); }
+    ul { list-style: none; margin: 12px 0 0; padding: 0; }
+    li {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      border-top: 1px solid var(--line);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+    }
+    .url { color: var(--accent); word-break: break-all; }
+    .copy { background: transparent; color: var(--muted); padding: 0; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sync scrubber</h1>
+    <p class="lede">Set sync on each camera at the same real-world moment. Use as ref on one camera only for offset math — start and end still apply to every feed. Start/Stop from any browser still runs the streams on this host.</p>
+    <p id="hostHint" class="hint" style="margin-top:-18px;margin-bottom:20px"></p>
+
+    <section>
+      <label class="field" for="folder">Video folder</label>
+      <div class="row">
+        <input id="folder" type="text" spellcheck="false" placeholder="/path/to/videos">
+        <select id="res" aria-label="Output resolution">
+          <option value="">Original</option>
+          <option value="480">480p</option>
+          <option value="720" selected>720p</option>
+          <option value="1080">1080p</option>
+        </select>
+        <button id="load" class="ghost" type="button">Load folder</button>
+      </div>
+      <p id="probeStatus" class="hint">Load a folder, then check the cameras you want as RTSP feeds.</p>
+    </section>
+
+    <section>
+      <div class="feeds-head">
+        <label class="field">Feeds</label>
+        <div class="row">
+          <button id="all" class="ghost" type="button">Select all</button>
+          <button id="none" class="ghost" type="button">Select none</button>
+          <button id="clearMarks" class="ghost" type="button">Clear sync marks</button>
+        </div>
+      </div>
+      <div id="grid" class="grid"><p class="empty-grid">Load a folder to show camera frames.</p></div>
+    </section>
+
+    <section>
+      <label class="field">Trim</label>
+      <div class="trim-stamps">
+        <span id="clockLabel" class="trim-tag">Start</span>
+        <div id="clockStamp" class="clock-host"></div>
+        <span class="trim-gap">→</span>
+        <span id="clockEndLabel" class="trim-tag">End</span>
+        <div id="clockEndStamp" class="clock-host"></div>
+      </div>
+      <div class="trim-row">
+        <button id="startPrev" class="ghost frame-btn" type="button" title="Start previous frame" aria-label="Start previous frame">−1</button>
+        <button id="startNext" class="ghost frame-btn" type="button" title="Start next frame" aria-label="Start next frame">+1</button>
+        <div class="trim-bar" aria-label="Start and end trim">
+          <div id="trimFill" class="trim-fill"></div>
+          <input id="slider" class="start" type="range" min="0" max="0" step="any" value="0" disabled aria-label="Start time">
+          <input id="endSlider" class="end" type="range" min="0" max="0" step="any" value="0" disabled aria-label="End time">
+        </div>
+        <button id="endPrev" class="ghost frame-btn" type="button" title="End previous frame" aria-label="End previous frame">−1</button>
+        <button id="endNext" class="ghost frame-btn" type="button" title="End next frame" aria-label="End next frame">+1</button>
+      </div>
+      <label class="check">
+        <input id="loop" type="checkbox" checked>
+        Loop RTSP between start and end
+      </label>
+      <label class="check">
+        <input id="align" type="checkbox">
+        Align cameras using sync marks
+      </label>
+      <label class="check">
+        <input id="overlay" type="checkbox">
+        Timestamp overlay (dd-mm-yyyy hh:mm:ss.sss)
+      </label>
+      <div class="row overlay-opts">
+        <div class="grow">
+          <label class="field" for="origin">Wall clock at file 00:00:00</label>
+          <input id="origin" type="datetime-local" step="1">
+        </div>
+        <div>
+          <label class="field" for="overlayPos">Corner</label>
+          <select id="overlayPos" aria-label="Timestamp overlay corner">
+            <option value="top-left" selected>Top left</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="top-right">Top right</option>
+            <option value="bottom-right">Bottom right</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original).</p>
+      <div class="row" style="margin-top: 14px;">
+        <button id="start" type="button" disabled>Start from here</button>
+        <button id="seek" class="ghost" type="button" disabled>Seek all</button>
+        <button id="stop" class="danger" type="button">Stop</button>
+        <label class="jitter-label" for="jitterSec">Jitter</label>
+        <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
+        <span class="jitter-label">s</span>
+        <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
+      </div>
+      <p id="runStatus" class="status"></p>
+      <p id="runError" class="error"></p>
+    </section>
+
+    <section>
+      <label class="field">RTSP URLs</label>
+      <ul id="urls"><li>No streams running.</li></ul>
+    </section>
+  </main>
+  <div id="lightbox" class="lightbox" hidden>
+    <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+    <div class="lightbox-card" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
+      <div class="lightbox-head">
+        <strong id="lightboxTitle">Camera</strong>
+        <button id="lightboxClose" class="ghost" type="button">Close</button>
+      </div>
+      <div class="preview-wrap lightbox-preview">
+        <img id="lightboxImg" alt="">
+        <div id="lightboxOverlay" class="ts-overlay top-left" hidden></div>
+      </div>
+      <div class="lightbox-controls">
+        <div class="sync-seek">
+          <div class="tick">
+            <span id="lightboxFps">Sync point</span>
+            <div id="lightboxStamp"></div>
+          </div>
+          <div class="seek-row">
+            <button id="lightboxPrev" class="ghost frame-btn" type="button" title="Previous frame">−1</button>
+            <input id="lightboxSeek" type="range" min="0" max="0" step="any" value="0">
+            <button id="lightboxNext" class="ghost frame-btn" type="button" title="Next frame">+1</button>
+          </div>
+        </div>
+        <div class="sync-tools lightbox-tools">
+          <button id="lightboxSync" class="ghost" type="button">Set sync</button>
+          <span id="lightboxSaved" class="sync-saved" hidden></span>
+          <button id="lightboxRef" class="ghost" type="button">Use as ref</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const folderEl = $("folder");
+    const resEl = $("res");
+    const slider = $("slider");
+    const endSlider = $("endSlider");
+    const loopEl = $("loop");
+    const alignEl = $("align");
+    const overlayEl = $("overlay");
+    const overlayPosEl = $("overlayPos");
+    const originEl = $("origin");
+    const jitterSecEl = $("jitterSec");
+    const jitterEl = $("jitter");
+    const probeStatus = $("probeStatus");
+    const runStatus = $("runStatus");
+    const runError = $("runError");
+    const urlsEl = $("urls");
+    const grid = $("grid");
+
+    let running = false;
+    let busy = false;
+    let sessionTimer = 0;
+    let previewImgs = [];
+    let videoMeta = [];
+    let previewTimer = 0;
+    let previewFrom = "start";
+    let savedSelected = null;
+    let syncMarks = {};
+    let syncRef = null;
+    let localSeek = {};
+    let localTimers = {};
+    let frameSeq = {};
+    let imgAbort = {};
+    let draggingSeek = null;
+    let lightboxName = null;
+    let jittering = false;
+    const camApi = {};
+    const OVERLAY_CORNERS = ["top-left", "bottom-left", "top-right", "bottom-right"];
+
+    const savedFolder = localStorage.getItem("rtspFolder");
+    if (savedFolder) folderEl.value = savedFolder;
+
+    function fmt(seconds) {
+      const p = partsFromSeconds(seconds);
+      const pad = (n, w=2) => String(n).padStart(w, "0");
+      return `${pad(p.h)}:${pad(p.m)}:${pad(p.s)}.${pad(p.ms, 3)}`;
+    }
+
+    function partsFromSeconds(seconds) {
+      let s = Math.max(0, Number(seconds) || 0);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      let whole = Math.floor(s % 60);
+      let ms = Math.round((s - Math.floor(s)) * 1000);
+      if (ms >= 1000) {
+        whole += 1;
+        ms = 0;
+      }
+      if (whole >= 60) {
+        return partsFromSeconds(h * 3600 + m * 60 + whole + ms / 1000);
+      }
+      return { h, m, s: whole, ms };
+    }
+
+    function secondsFromParts(p) {
+      return Math.max(0, p.h) * 3600 + Math.min(59, Math.max(0, p.m)) * 60
+        + Math.min(59, Math.max(0, p.s)) + Math.min(999, Math.max(0, p.ms)) / 1000;
+    }
+
+    function parseStamp(str) {
+      const raw = String(str || "").trim();
+      if (!raw) return null;
+      let m = raw.match(/^(\d{1,3}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?$/);
+      if (m) {
+        return secondsFromParts({
+          h: Number(m[1]),
+          m: Number(m[2]),
+          s: Number(m[3]),
+          ms: Number(m[4] || "0"),
+        });
+      }
+      m = raw.match(/^(\d{1,3}):(\d{1,2})(?:\.(\d{1,3}))?$/);
+      if (m) {
+        return secondsFromParts({
+          h: 0,
+          m: Number(m[1]),
+          s: Number(m[2]),
+          ms: Number(m[3] || "0"),
+        });
+      }
+      const n = Number(raw);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    }
+
+    function createStamp(ariaPrefix) {
+      const wrap = document.createElement("div");
+      wrap.className = "stamp";
+      const mk = (cls, max, label) => {
+        const el = document.createElement("input");
+        el.type = "text";
+        el.autocomplete = "off";
+        el.spellcheck = false;
+        el.className = "stamp-part " + cls;
+        el.maxLength = max;
+        el.setAttribute("aria-label", ariaPrefix + " " + label);
+        return el;
+      };
+      const h = mk("hh", 2, "hours");
+      const min = mk("mm", 2, "minutes");
+      const s = mk("ss", 2, "seconds");
+      const ms = mk("ms", 3, "milliseconds");
+      const sep = (ch) => {
+        const span = document.createElement("span");
+        span.className = "sep";
+        span.textContent = ch;
+        return span;
+      };
+      wrap.append(h, sep(":"), min, sep(":"), s, sep("."), ms);
+      wrap._fields = { h, m: min, s, ms };
+      return wrap;
+    }
+
+    function stampFocused(wrap) {
+      return !!(wrap && wrap.contains(document.activeElement));
+    }
+
+    function writeStamp(wrap, t, force) {
+      if (!wrap || !wrap._fields) return;
+      if (!force && stampFocused(wrap)) return;
+      const p = partsFromSeconds(t);
+      const pad = (n, w) => String(n).padStart(w, "0");
+      wrap._fields.h.value = pad(p.h, 2);
+      wrap._fields.m.value = pad(p.m, 2);
+      wrap._fields.s.value = pad(p.s, 2);
+      wrap._fields.ms.value = pad(p.ms, 3);
+    }
+
+    function readStamp(wrap) {
+      const num = (el) => {
+        const v = String(el.value || "").replace(/\D/g, "");
+        return v === "" ? 0 : Number(v);
+      };
+      const f = wrap._fields;
+      return { h: num(f.h), m: num(f.m), s: num(f.s), ms: num(f.ms) };
+    }
+
+    function setStampDisabled(wrap, disabled) {
+      if (!wrap || !wrap._fields) return;
+      if (disabled && stampFocused(wrap)) return;
+      Object.values(wrap._fields).forEach((el) => { el.disabled = disabled; });
+    }
+
+    function bindStamp(wrap, getRange, apply) {
+      const order = [wrap._fields.h, wrap._fields.m, wrap._fields.s, wrap._fields.ms];
+      let ignoreBlur = false;
+      const commit = () => {
+        const range = getRange();
+        const t = snapTime(Math.min(range.max, Math.max(range.min, secondsFromParts(readStamp(wrap)))));
+        writeStamp(wrap, t, true);
+        apply(t);
+      };
+      const bump = (field, dir) => {
+        const range = getRange();
+        const p = partsFromSeconds(range.current());
+        if (field === "h") p.h += dir;
+        else if (field === "m") p.m += dir;
+        else if (field === "s") p.s += dir;
+        else p.ms += dir;
+        while (p.ms >= 1000) { p.ms -= 1000; p.s += 1; }
+        while (p.ms < 0) { p.ms += 1000; p.s -= 1; }
+        while (p.s >= 60) { p.s -= 60; p.m += 1; }
+        while (p.s < 0) { p.s += 60; p.m -= 1; }
+        while (p.m >= 60) { p.m -= 60; p.h += 1; }
+        while (p.m < 0) { p.m += 60; p.h -= 1; }
+        if (p.h < 0) { p.h = 0; p.m = 0; p.s = 0; p.ms = 0; }
+        const t = snapTime(Math.min(range.max, Math.max(range.min, secondsFromParts(p))));
+        writeStamp(wrap, t, true);
+        apply(t);
+      };
+      const focusNext = (el) => {
+        const i = order.indexOf(el);
+        if (i < 0 || i >= order.length - 1) return;
+        ignoreBlur = true;
+        order[i + 1].focus();
+        order[i + 1].select();
+        requestAnimationFrame(() => { ignoreBlur = false; });
+      };
+      Object.entries(wrap._fields).forEach(([field, el]) => {
+        el.addEventListener("focus", () => el.select());
+        el.addEventListener("input", () => {
+          el.value = el.value.replace(/\D/g, "").slice(0, el.maxLength);
+          const range = getRange();
+          const t = snapTime(Math.min(range.max, Math.max(range.min, secondsFromParts(readStamp(wrap)))));
+          apply(t);
+          if (el.value.length >= el.maxLength) focusNext(el);
+        });
+        el.addEventListener("blur", () => {
+          if (!ignoreBlur) commit();
+        });
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); el.blur(); }
+          if (e.key === "Escape") {
+            writeStamp(wrap, getRange().current(), true);
+            el.blur();
+          }
+          if (e.key === "ArrowUp") { e.preventDefault(); bump(field, 1); el.select(); }
+          if (e.key === "ArrowDown") { e.preventDefault(); bump(field, -1); el.select(); }
+        });
+      });
+      wrap.addEventListener("paste", (e) => {
+        const text = (e.clipboardData && e.clipboardData.getData("text")) || "";
+        const parsed = parseStamp(text);
+        if (parsed == null) return;
+        e.preventDefault();
+        const range = getRange();
+        const t = snapTime(Math.min(range.max, Math.max(range.min, parsed)));
+        writeStamp(wrap, t, true);
+        apply(t);
+      });
+    }
+
+    const clockStamp = createStamp("Start");
+    const clockEndStamp = createStamp("End");
+    $("clockStamp").append(clockStamp);
+    $("clockEndStamp").append(clockEndStamp);
+    writeStamp(clockStamp, 0, true);
+    writeStamp(clockEndStamp, 0, true);
+    const lightboxStamp = createStamp("Enlarged camera");
+    $("lightboxStamp").append(lightboxStamp);
+    writeStamp(lightboxStamp, 0, true);
+
+    function setClocks() {
+      writeStamp(clockStamp, slider.value);
+      writeStamp(clockEndStamp, endSlider.value);
+      $("clockLabel").textContent = "Start";
+      $("clockEndLabel").textContent = "End";
+      updateTrimFill();
+    }
+
+    function updateTrimFill() {
+      const fill = $("trimFill");
+      if (!fill) return;
+      const min = Number(slider.min);
+      const max = Number(slider.max);
+      const span = Math.max(1e-6, max - min);
+      const a = (Number(slider.value) - min) / span;
+      const b = (Number(endSlider.value) - min) / span;
+      const lo = Math.max(0, Math.min(a, b));
+      const hi = Math.max(lo, Math.max(a, b));
+      fill.style.left = (lo * 100) + "%";
+      fill.style.width = ((hi - lo) * 100) + "%";
+    }
+
+    function selectedNames() {
+      return [...grid.querySelectorAll("input.pick:checked")].map((el) => el.dataset.name);
+    }
+
+    function marksKey() {
+      return "rtspSync:" + folderEl.value.trim();
+    }
+
+    function persistMarks() {
+      persistSession();
+    }
+
+    function sessionPayload() {
+      const seeks = {};
+      videoMeta.forEach((v) => { seeks[v.name] = seekOf(v.name); });
+      return {
+        folder: folderEl.value.trim(),
+        height: resEl.value,
+        offset: Number(slider.value) || 0,
+        end: Number(endSlider.value) || 0,
+        loop: loopEl.checked,
+        align: alignEl.checked,
+        selected: selectedNames(),
+        marks: syncMarks,
+        ref: syncRef,
+        seeks,
+        overlay: overlayEl.checked,
+        overlay_pos: overlayPosEl.value,
+        origin: originEl.value,
+        jitter: Number(jitterSecEl.value) || 2,
+      };
+    }
+
+    function persistSession() {
+      const folder = folderEl.value.trim();
+      if (!folder || running || busy) return;
+      localStorage.setItem(marksKey(), JSON.stringify({ marks: syncMarks, ref: syncRef, align: alignEl.checked }));
+      localStorage.setItem("rtspFolder", folder);
+      clearTimeout(sessionTimer);
+      sessionTimer = setTimeout(() => {
+        api("/api/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sessionPayload()),
+        }).catch(() => {});
+      }, 250);
+    }
+
+    function restoreMarksFromLocal() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(marksKey()) || "null");
+        syncMarks = (raw && raw.marks) || {};
+        syncRef = (raw && raw.ref) || null;
+        if (raw && raw.align) alignEl.checked = true;
+      } catch (_) {
+        syncMarks = {};
+        syncRef = null;
+      }
+    }
+
+    function applySavedSync(data) {
+      if (data && data.has_file) {
+        syncMarks = { ...(data.marks || {}) };
+        syncRef = data.ref || null;
+        alignEl.checked = !!data.align;
+      } else if (data && (Object.keys(data.marks || {}).length || data.ref)) {
+        syncMarks = { ...(data.marks || {}) };
+        syncRef = data.ref || null;
+        if (data.align) alignEl.checked = true;
+      } else {
+        restoreMarksFromLocal();
+        if (Object.keys(syncMarks).length || syncRef) persistSession();
+      }
+      if (data && data.seeks && Object.keys(data.seeks).length) {
+        localSeek = { ...syncMarks, ...data.seeks };
+      } else {
+        localSeek = { ...syncMarks };
+      }
+    }
+
+    function seekOf(name) {
+      if (localSeek[name] != null) return Number(localSeek[name]);
+      if (syncMarks[name] != null) return Number(syncMarks[name]);
+      return 0;
+    }
+
+    function previewTime(name) {
+      if (alignOn()) {
+        const t = previewFrom === "end" ? Number(endSlider.value) : Number(slider.value);
+        return fileTime(name, t);
+      }
+      return seekOf(name);
+    }
+
+    function refName() {
+      const files = selectedNames();
+      if (syncRef && files.includes(syncRef) && syncMarks[syncRef] != null) return syncRef;
+      return null;
+    }
+
+    function marksComplete() {
+      const files = selectedNames();
+      return files.length > 0 && files.every((n) => syncMarks[n] != null);
+    }
+
+    function alignOn() {
+      return alignEl.checked && marksComplete() && refName() != null;
+    }
+
+    function fileTime(name, timelineT) {
+      if (!alignOn()) return timelineT;
+      const ref = refName();
+      if (ref == null || syncMarks[name] == null || syncMarks[ref] == null) return timelineT;
+      return timelineT + (syncMarks[name] - syncMarks[ref]);
+    }
+
+    function durationOf(name) {
+      const row = videoMeta.find((v) => v.name === name);
+      return row ? row.duration : 0;
+    }
+
+    function fpsOf(name) {
+      const row = videoMeta.find((v) => v.name === name);
+      const fps = row && Number(row.fps);
+      return fps > 0 ? fps : 30;
+    }
+
+    function frameStep(name) {
+      return 1 / fpsOf(name);
+    }
+
+    function snapTime(t) {
+      return Math.round(Number(t) * 10000) / 10000;
+    }
+
+    function globalStep() {
+      const names = selectedNames();
+      const ref = alignOn() ? refName() : names[0];
+      return ref ? frameStep(ref) : 1 / 30;
+    }
+
+    function selectedMax() {
+      const names = selectedNames();
+      if (!names.length) return 0;
+      if (!alignOn()) {
+        const durs = names.map(durationOf);
+        return Math.max(0, Math.floor(Math.min(...durs) * 1000) / 1000);
+      }
+      const ref = refName();
+      let tMax = Infinity;
+      names.forEach((n) => {
+        const delta = syncMarks[n] - syncMarks[ref];
+        tMax = Math.min(tMax, durationOf(n) - delta);
+      });
+      return Math.max(0, Math.floor(tMax * 1000) / 1000);
+    }
+
+    function selectedMin() {
+      if (!alignOn()) return 0;
+      const ref = refName();
+      let tMin = -Infinity;
+      selectedNames().forEach((n) => {
+        const delta = syncMarks[n] - syncMarks[ref];
+        tMin = Math.max(tMin, -delta);
+      });
+      return Math.max(0, Math.floor(tMin * 1000) / 1000);
+    }
+
+    function paintSyncLabels() {
+      const ref = refName();
+      grid.querySelectorAll(".tile").forEach((tile) => {
+        const name = tile.querySelector("input.pick")?.dataset.name;
+        if (!name) return;
+        const meta = tile.querySelector(".sync-meta");
+        const stamp = tile.querySelector(".stamp");
+        const mark = syncMarks[name];
+        const shown = previewTime(name);
+        if (stamp) writeStamp(stamp, seekOf(name));
+        let text = alignOn() ? "preview " + fmt(shown) : "file " + fmt(shown);
+        if (mark != null) text += " · sync " + fmt(mark);
+        else text += " · no sync mark";
+        if (name === ref) text += " · REF";
+        if (meta) meta.textContent = text;
+        tile.classList.toggle("reference", name === syncRef);
+      });
+      paintSyncButtons();
+      syncLightbox();
+      paintOverlays();
+    }
+
+    function padNum(n, w) {
+      return String(n).padStart(w, "0");
+    }
+
+    function toLocalInput(ms) {
+      const d = new Date(ms);
+      return padNum(d.getFullYear(), 4) + "-" + padNum(d.getMonth() + 1, 2) + "-" + padNum(d.getDate(), 2)
+        + "T" + padNum(d.getHours(), 2) + ":" + padNum(d.getMinutes(), 2) + ":" + padNum(d.getSeconds(), 2);
+    }
+
+    function originMs() {
+      const raw = originEl.value;
+      if (!raw) return null;
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    }
+
+    function defaultOriginValue(videos) {
+      let ms = Date.now();
+      const list = videos || videoMeta;
+      const times = (list || []).map((v) => Number(v.mtime || 0) * 1000).filter((x) => x > 0);
+      if (times.length) ms = Math.min(...times);
+      return toLocalInput(ms);
+    }
+
+    function ensureOrigin() {
+      if (!originEl.value) originEl.value = defaultOriginValue();
+    }
+
+    function wallStamp(fileSec) {
+      const base = originMs();
+      const d = new Date((base == null ? 0 : base) + Number(fileSec) * 1000);
+      return padNum(d.getDate(), 2) + "-" + padNum(d.getMonth() + 1, 2) + "-" + padNum(d.getFullYear(), 4)
+        + " " + padNum(d.getHours(), 2) + ":" + padNum(d.getMinutes(), 2) + ":" + padNum(d.getSeconds(), 2)
+        + "." + padNum(d.getMilliseconds(), 3);
+    }
+
+    function overlayCorner() {
+      const v = overlayPosEl.value;
+      return OVERLAY_CORNERS.includes(v) ? v : "top-left";
+    }
+
+    function applyOverlayCorner(el) {
+      const corner = overlayCorner();
+      OVERLAY_CORNERS.forEach((c) => el.classList.toggle(c, c === corner));
+    }
+
+    function paintOverlays() {
+      const on = overlayEl.checked;
+      grid.querySelectorAll(".tile").forEach((tile) => {
+        const el = tile.querySelector(".ts-overlay");
+        const name = tile.querySelector("input.pick")?.dataset.name;
+        if (!el || !name) return;
+        applyOverlayCorner(el);
+        el.hidden = !on;
+        if (on) el.textContent = wallStamp(previewTime(name));
+      });
+      const lb = $("lightboxOverlay");
+      if (lb) {
+        applyOverlayCorner(lb);
+        lb.hidden = !on || !lightboxName;
+        if (on && lightboxName) lb.textContent = wallStamp(previewTime(lightboxName));
+      }
+    }
+
+    function paintSyncButtons() {
+      grid.querySelectorAll(".tile").forEach((tile) => {
+        const name = tile.querySelector("input.pick")?.dataset.name;
+        if (!name) return;
+        const markBtn = tile.querySelector(".set-sync");
+        const refBtn = tile.querySelector(".use-ref");
+        const timeEl = tile.querySelector(".sync-saved");
+        const marked = syncMarks[name] != null;
+        if (markBtn) markBtn.classList.toggle("sync-on", marked);
+        if (timeEl) {
+          timeEl.textContent = marked ? fmt(syncMarks[name]) : "";
+          timeEl.hidden = !marked;
+        }
+        const isRef = syncRef === name;
+        if (refBtn) {
+          refBtn.classList.toggle("sync-on", isRef);
+          refBtn.disabled = !!(syncRef && !isRef);
+        }
+      });
+      const lbName = lightboxName;
+      if (!lbName) return;
+      const marked = syncMarks[lbName] != null;
+      $("lightboxSync").classList.toggle("sync-on", marked);
+      $("lightboxSaved").textContent = marked ? fmt(syncMarks[lbName]) : "";
+      $("lightboxSaved").hidden = !marked;
+      const isRef = syncRef === lbName;
+      $("lightboxRef").classList.toggle("sync-on", isRef);
+      $("lightboxRef").disabled = !!(syncRef && !isRef);
+    }
+
+    function applyRange() {
+      const min = selectedMin();
+      const max = selectedMax();
+      slider.min = String(min);
+      endSlider.min = String(min);
+      slider.max = String(max);
+      endSlider.max = String(max);
+      if (Number(slider.value) < min) slider.value = String(min);
+      if (Number(slider.value) > max) slider.value = String(max);
+      if (!Number(endSlider.value) || Number(endSlider.value) > max) endSlider.value = String(max);
+      if (Number(endSlider.value) < min) endSlider.value = String(Math.min(max, min + 0.5));
+      if (Number(endSlider.value) < Number(slider.value) + 0.5 && max >= Number(slider.value) + 0.5) {
+        endSlider.value = String(Math.min(max, Number(slider.value) + 0.5));
+      }
+      const noRange = !(max > min);
+      slider.step = "any";
+      endSlider.step = "any";
+      const canAlign = marksComplete() && !!syncRef && selectedNames().includes(syncRef);
+      if (!running && !canAlign) alignEl.checked = false;
+      setClocks();
+      syncTileSliders();
+      paintSyncLabels();
+      setControlLock(noRange, canAlign);
+    }
+
+    function setControlLock(noRange, canAlign) {
+      if (noRange == null) noRange = !(Number(slider.max) > Number(slider.min));
+      if (canAlign == null) {
+        canAlign = marksComplete() && !!syncRef && selectedNames().includes(syncRef);
+      }
+      const locked = running || busy;
+      document.body.classList.toggle("streams-locked", running);
+      folderEl.readOnly = locked;
+      folderEl.disabled = locked;
+      resEl.disabled = locked;
+      loopEl.disabled = locked;
+      overlayEl.disabled = locked;
+      overlayPosEl.disabled = locked;
+      originEl.disabled = locked;
+      jitterSecEl.disabled = busy;
+      jitterEl.disabled = busy || !running;
+      ["load", "all", "none", "clearMarks", "startPrev", "startNext", "endPrev", "endNext",
+        "lightboxPrev", "lightboxNext", "lightboxSync", "lightboxRef"].forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = locked;
+      });
+      slider.disabled = locked || noRange;
+      endSlider.disabled = locked || noRange;
+      $("lightboxSeek").disabled = locked;
+      setStampDisabled(clockStamp, locked || noRange);
+      setStampDisabled(clockEndStamp, locked || noRange);
+      $("start").disabled = locked || noRange || selectedNames().length === 0;
+      $("seek").disabled = locked || noRange || selectedNames().length === 0;
+      alignEl.disabled = locked || !canAlign;
+      $("stop").disabled = busy;
+      grid.querySelectorAll("input.pick, input.cam-seek, .set-sync, .use-ref, .frame-btn, .stamp-part").forEach((el) => {
+        el.disabled = locked;
+      });
+      if (!locked) paintSyncButtons();
+    }
+
+    function syncTileSliders() {
+      grid.querySelectorAll("input.cam-seek").forEach((el) => {
+        const name = el.dataset.name;
+        const dur = durationOf(name);
+        if (draggingSeek === name) return;
+        el.max = String(Math.max(0, dur));
+        el.step = "any";
+        if (document.activeElement === el) return;
+        const t = Math.min(Number(el.max), seekOf(name));
+        el.value = String(t);
+      });
+    }
+
+    function setBusy(on) {
+      busy = on;
+      if (!on) applyRange();
+      else setControlLock();
+    }
+
+    function renderGrid(videos) {
+      grid.innerHTML = "";
+      previewImgs = [];
+      Object.keys(camApi).forEach((k) => { delete camApi[k]; });
+      if (lightboxName) closeLightbox();
+      videoMeta = videos || [];
+      if (!videoMeta.length) {
+        grid.innerHTML = '<p class="empty-grid">Load a folder to show camera frames.</p>';
+        return;
+      }
+      const prefer = new Set(savedSelected || videoMeta.map((v) => v.name));
+      videoMeta.forEach((v) => {
+        const tile = document.createElement("div");
+        tile.className = "tile";
+        const img = document.createElement("img");
+        img.alt = v.name;
+        img.dataset.name = v.name;
+        img.title = "Click to enlarge";
+        img.addEventListener("click", () => openLightbox(v.name));
+        const wrap = document.createElement("div");
+        wrap.className = "preview-wrap";
+        const ts = document.createElement("div");
+        ts.className = "ts-overlay " + overlayCorner();
+        ts.hidden = true;
+        wrap.append(img, ts);
+        const cap = document.createElement("div");
+        cap.className = "cap";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = "pick";
+        box.checked = prefer.has(v.name);
+        box.dataset.name = v.name;
+        box.setAttribute("aria-label", "Publish " + v.name);
+        const name = document.createElement("span");
+        name.textContent = v.name;
+        cap.append(box, name);
+        const tools = document.createElement("div");
+        tools.className = "sync-tools";
+        const markBtn = document.createElement("button");
+        markBtn.className = "ghost set-sync";
+        markBtn.type = "button";
+        markBtn.textContent = "Set sync";
+        markBtn.title = "Save this camera’s current time as the shared event";
+        const saved = document.createElement("span");
+        saved.className = "sync-saved";
+        saved.hidden = true;
+        const refBtn = document.createElement("button");
+        refBtn.className = "ghost use-ref";
+        refBtn.type = "button";
+        refBtn.textContent = "Use as ref";
+        refBtn.title = "Use this camera as the origin for offset math. Does not set start or end.";
+        const seekWrap = document.createElement("div");
+        seekWrap.className = "sync-seek";
+        const seekRow = document.createElement("div");
+        seekRow.className = "tick";
+        const seekLabel = document.createElement("span");
+        seekLabel.textContent = "Sync point · " + (Math.round(fpsOf(v.name) * 100) / 100) + " fps";
+        const stamp = createStamp("Sync point for " + v.name);
+        stamp.classList.add("sync-now");
+        writeStamp(stamp, seekOf(v.name), true);
+        seekRow.append(seekLabel, stamp);
+        const camSeek = document.createElement("input");
+        camSeek.type = "range";
+        camSeek.className = "cam-seek";
+        camSeek.min = "0";
+        camSeek.step = "any";
+        const dur = Math.max(0, v.duration);
+        camSeek.max = String(dur);
+        camSeek.value = String(Math.min(dur, seekOf(v.name)));
+        camSeek.dataset.name = v.name;
+        camSeek.setAttribute("aria-label", "Sync point for " + v.name);
+        const prevBtn = document.createElement("button");
+        prevBtn.className = "ghost frame-btn";
+        prevBtn.type = "button";
+        prevBtn.textContent = "−1";
+        prevBtn.title = "Previous frame";
+        prevBtn.setAttribute("aria-label", "Previous frame for " + v.name);
+        const nextBtn = document.createElement("button");
+        nextBtn.className = "ghost frame-btn";
+        nextBtn.type = "button";
+        nextBtn.textContent = "+1";
+        nextBtn.title = "Next frame";
+        nextBtn.setAttribute("aria-label", "Next frame for " + v.name);
+        const seekControls = document.createElement("div");
+        seekControls.className = "seek-row";
+        seekControls.append(prevBtn, camSeek, nextBtn);
+        seekWrap.append(seekRow, seekControls);
+        const meta = document.createElement("div");
+        meta.className = "sync-meta";
+        const applyTime = (t, immediate) => {
+          if (running) return;
+          t = snapTime(Math.min(dur, Math.max(0, t)));
+          localSeek[v.name] = t;
+          if (draggingSeek !== v.name) camSeek.value = String(t);
+          writeStamp(stamp, t);
+          if (draggingSeek !== v.name) applyRange();
+          else paintSyncLabels();
+          persistSession();
+          queueLocalPreview(v.name, immediate);
+        };
+        const commitSync = () => {
+          syncMarks[v.name] = seekOf(v.name);
+          applyRange();
+          persistMarks();
+        };
+        const toggleRef = () => {
+          syncRef = syncRef === v.name ? null : v.name;
+          applyRange();
+          persistMarks();
+        };
+        const nudgeCam = (dir) => {
+          applyTime(seekOf(v.name) + dir * frameStep(v.name), true);
+        };
+        const endDrag = () => {
+          if (draggingSeek === v.name) draggingSeek = null;
+        };
+        camSeek.addEventListener("pointerdown", () => { draggingSeek = v.name; });
+        camSeek.addEventListener("pointerup", endDrag);
+        camSeek.addEventListener("pointercancel", endDrag);
+        camSeek.addEventListener("pointerleave", (e) => {
+          if (e.buttons === 0) endDrag();
+        });
+        camSeek.addEventListener("change", endDrag);
+        camSeek.addEventListener("input", () => applyTime(Number(camSeek.value), false));
+        camSeek.addEventListener("keydown", (e) => {
+          if (e.key === "ArrowLeft") { e.preventDefault(); nudgeCam(-1); }
+          if (e.key === "ArrowRight") { e.preventDefault(); nudgeCam(1); }
+        });
+        holdRepeat(prevBtn, () => nudgeCam(-1));
+        holdRepeat(nextBtn, () => nudgeCam(1));
+        markBtn.addEventListener("click", commitSync);
+        bindStamp(stamp, () => ({
+          min: 0,
+          max: dur,
+          current: () => seekOf(v.name),
+        }), (t) => applyTime(t, true));
+        refBtn.addEventListener("click", toggleRef);
+        camApi[v.name] = {
+          applyTime,
+          nudge: nudgeCam,
+          setSync: commitSync,
+          setRef: toggleRef,
+        };
+        tools.append(markBtn, saved, refBtn);
+        tile.append(wrap, cap, seekWrap, tools, meta);
+        if (!box.checked) tile.classList.add("off");
+        box.addEventListener("change", () => {
+          tile.classList.toggle("off", !box.checked);
+          applyRange();
+          persistSession();
+        });
+        grid.append(tile);
+        previewImgs.push(img);
+      });
+    }
+
+    function holdRepeat(btn, fn) {
+      let timer = 0;
+      let fromPointer = false;
+      const stop = () => {
+        clearTimeout(timer);
+        timer = 0;
+      };
+      btn.addEventListener("pointerdown", (e) => {
+        if (btn.disabled) return;
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        fromPointer = true;
+        e.preventDefault();
+        fn();
+        timer = setTimeout(function tick() {
+          if (btn.disabled) { stop(); return; }
+          fn();
+          timer = setTimeout(tick, 70);
+        }, 320);
+      });
+      btn.addEventListener("click", (e) => {
+        if (fromPointer) {
+          fromPointer = false;
+          e.preventDefault();
+          return;
+        }
+        if (btn.disabled) return;
+        fn();
+      });
+      btn.addEventListener("pointerup", stop);
+      btn.addEventListener("pointerleave", stop);
+      btn.addEventListener("pointercancel", stop);
+    }
+
+    function clampTime(name, t) {
+      const dur = durationOf(name);
+      const eps = Math.min(0.02, frameStep(name) / 2);
+      return Math.max(0, Math.min(Math.max(0, dur - eps), t));
+    }
+
+    async function loadFrame(img, t) {
+      const name = img.dataset.name;
+      const seq = (frameSeq[name] = (frameSeq[name] || 0) + 1);
+      if (imgAbort[name]) imgAbort[name].abort();
+      const ac = new AbortController();
+      imgAbort[name] = ac;
+      const height = lightboxName === name ? 1080 : 360;
+      const url = "/api/frame?name=" + encodeURIComponent(name)
+        + "&t=" + encodeURIComponent(clampTime(name, t))
+        + "&h=" + encodeURIComponent(height);
+      try {
+        const res = await fetch(url, { signal: ac.signal });
+        if (!res.ok || seq !== frameSeq[name]) return;
+        const blob = await res.blob();
+        if (seq !== frameSeq[name]) return;
+        const objectUrl = URL.createObjectURL(blob);
+        const old = img.src;
+        img.src = objectUrl;
+        if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+        if (lightboxName === name) {
+          const lb = $("lightboxImg");
+          const prev = lb.src;
+          lb.src = URL.createObjectURL(blob);
+          if (prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+        }
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+      }
+    }
+
+    function syncLightbox() {
+      if (!lightboxName) return;
+      const name = lightboxName;
+      const t = seekOf(name);
+      const dur = durationOf(name);
+      $("lightboxTitle").textContent = name;
+      $("lightboxFps").textContent = "Sync point · " + (Math.round(fpsOf(name) * 100) / 100) + " fps";
+      const seek = $("lightboxSeek");
+      seek.min = "0";
+      seek.max = String(Math.max(0, dur));
+      if (draggingSeek !== "lightbox") seek.value = String(Math.min(dur, t));
+      writeStamp(lightboxStamp, t);
+    }
+
+    function openLightbox(name) {
+      lightboxName = name;
+      $("lightbox").hidden = false;
+      syncLightbox();
+      const img = previewImgs.find((el) => el.dataset.name === name);
+      if (img && img.src) $("lightboxImg").src = img.src;
+      queueLocalPreview(name, true);
+    }
+
+    function closeLightbox() {
+      lightboxName = null;
+      $("lightbox").hidden = true;
+    }
+
+    function queueLocalPreview(name, immediate) {
+      paintSyncLabels();
+      clearTimeout(localTimers[name]);
+      const runOne = () => {
+        const img = previewImgs.find((el) => el.dataset.name === name);
+        if (img) loadFrame(img, seekOf(name));
+      };
+      if (immediate) runOne();
+      else localTimers[name] = setTimeout(runOne, 120);
+    }
+
+    async function refreshPreviews() {
+      if (!previewImgs.length) return;
+      paintSyncLabels();
+      await Promise.all(previewImgs.map((img) => loadFrame(img, previewTime(img.dataset.name))));
+    }
+
+    function queuePreviews(which) {
+      previewFrom = which;
+      setClocks();
+      paintSyncLabels();
+      if (!alignOn()) return;
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(refreshPreviews, 280);
+    }
+
+    function renderUrls(urls) {
+      urlsEl.innerHTML = "";
+      if (!urls || !urls.length) {
+        urlsEl.innerHTML = "<li>No streams running.</li>";
+        return;
+      }
+      urls.forEach((url) => {
+        const li = document.createElement("li");
+        const span = document.createElement("span");
+        span.className = "url";
+        span.textContent = url;
+        const btn = document.createElement("button");
+        btn.className = "copy";
+        btn.type = "button";
+        btn.textContent = "Copy";
+        btn.addEventListener("click", async () => {
+          await navigator.clipboard.writeText(url);
+          btn.textContent = "Copied";
+          setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+        });
+        li.append(span, btn);
+        urlsEl.append(li);
+      });
+    }
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    async function applyProbe(data) {
+      applySavedSync(data);
+      if (!originEl.value) originEl.value = defaultOriginValue(data.videos);
+      renderGrid(data.videos);
+      applyRange();
+      const names = data.videos.map((v) => v.name + " (" + fmt(v.duration) + ")").join(", ");
+      const n = data.count ?? (data.videos || []).length;
+      probeStatus.textContent = n + " video(s) in folder. Check the ones to publish. " + names;
+      await refreshPreviews();
+    }
+
+    async function loadFolder() {
+      const folder = folderEl.value.trim();
+      runError.textContent = "";
+      if (!folder) {
+        probeStatus.textContent = "Enter a folder path.";
+        return;
+      }
+      setBusy(true);
+      probeStatus.textContent = "Reading video durations…";
+      try {
+        savedSelected = null;
+        const data = await api("/api/probe?folder=" + encodeURIComponent(folder));
+        await applyProbe(data);
+        persistSession();
+      } catch (err) {
+        probeStatus.textContent = err.message;
+        renderGrid([]);
+        applyRange();
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function startAtSlider(kind) {
+      const folder = folderEl.value.trim();
+      const files = selectedNames();
+      const startT = Number(slider.value);
+      const endT = Number(endSlider.value);
+      runError.textContent = "";
+      if (!files.length) {
+        runError.textContent = "Select at least one camera.";
+        return;
+      }
+      if (endT < startT + 0.5) {
+        runError.textContent = "End time must be at least 0.5s after start.";
+        return;
+      }
+      runStatus.textContent = kind === "seek"
+        ? "Updating " + files.length + " RTSP feed(s)…"
+        : "Starting " + files.length + " RTSP feed(s)…";
+      runStatus.className = "status";
+      setBusy(true);
+      try {
+        const payload = {
+          folder,
+          height: resEl.value,
+          offset: startT,
+          end: endT,
+          loop: loopEl.checked,
+          files,
+        };
+        if (alignOn()) {
+          const ref = refName();
+          const marks = {};
+          files.forEach((n) => { marks[n] = syncMarks[n]; });
+          payload.marks = marks;
+          payload.ref = ref;
+        }
+        payload.overlay = overlayEl.checked;
+        payload.overlay_pos = overlayCorner();
+        if (payload.overlay) ensureOrigin();
+        payload.origin = originEl.value;
+        payload.jitter = Number(jitterSecEl.value) || 2;
+        const data = await api("/api/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        renderUrls(data.urls);
+        running = true;
+        runStatus.textContent = data.message + " Streams run on this host.";
+        runStatus.className = "status ok";
+      } catch (err) {
+        runError.textContent = err.message;
+        runStatus.textContent = "";
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function stopStreams() {
+      runError.textContent = "";
+      setBusy(true);
+      try {
+        const data = await api("/api/stop", { method: "POST" });
+        renderUrls([]);
+        running = false;
+        runStatus.textContent = data.message;
+        runStatus.className = "status";
+      } catch (err) {
+        runError.textContent = err.message;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function jitterFeeds() {
+      const sec = Number(jitterSecEl.value);
+      runError.textContent = "";
+      if (!(sec >= 0.1 && sec <= 120)) {
+        runError.textContent = "Jitter seconds must be between 0.1 and 120.";
+        return;
+      }
+      if (!running) {
+        runError.textContent = "Start feeds before jitter.";
+        return;
+      }
+      jittering = true;
+      setBusy(true);
+      runStatus.textContent = "Jitter: stopping feeds for " + sec + "s…";
+      runStatus.className = "status";
+      try {
+        const data = await api("/api/jitter", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ seconds: sec }),
+        });
+        renderUrls(data.urls || []);
+        running = true;
+        runStatus.textContent = data.message + " Streams run on this host.";
+        runStatus.className = "status ok";
+      } catch (err) {
+        runError.textContent = err.message;
+        runStatus.textContent = "";
+        running = false;
+        renderUrls([]);
+      } finally {
+        jittering = false;
+        setBusy(false);
+      }
+    }
+
+    async function refreshStatus() {
+      try {
+        const data = await api("/api/status");
+        if (data.ui_url) {
+          $("hostHint").textContent = "Open " + data.ui_url + " from other machines. Start still runs the feeds on this host.";
+        }
+        if (data.folder) folderEl.value = data.folder;
+        if (data.height != null) resEl.value = String(data.height);
+        if (data.loop === false) loopEl.checked = false;
+        if (data.loop === true) loopEl.checked = true;
+        if (data.overlay) overlayEl.checked = true;
+        if (data.overlay === false) overlayEl.checked = false;
+        if (data.origin) originEl.value = String(data.origin).slice(0, 19);
+        if (data.overlay_pos && OVERLAY_CORNERS.includes(data.overlay_pos)) overlayPosEl.value = data.overlay_pos;
+        if (data.jitter != null && Number(data.jitter) > 0) jitterSecEl.value = String(data.jitter);
+        if (data.selected && data.selected.length) savedSelected = data.selected;
+        if (data.seeks) Object.keys(data.seeks).forEach((name) => { localSeek[name] = data.seeks[name]; });
+        if (data.videos && data.videos.length) {
+          if (data.offset != null) slider.value = String(data.offset);
+          await applyProbe(data);
+          if (data.end != null) endSlider.value = String(data.end);
+          applyRange();
+          if (data.end != null) endSlider.value = String(Math.min(Number(endSlider.max), data.end));
+          setClocks();
+          if (alignOn()) await refreshPreviews();
+        }
+        running = !!data.running;
+        renderUrls(data.urls || []);
+        if (data.running) {
+          runStatus.textContent = "Streams running on this host.";
+          runStatus.className = "status ok";
+        }
+        applyRange();
+        setBusy(false);
+      } catch (_) {
+        setBusy(false);
+      }
+    }
+
+    slider.addEventListener("pointerdown", () => {
+      slider.style.zIndex = "4";
+      endSlider.style.zIndex = "3";
+    });
+    endSlider.addEventListener("pointerdown", () => {
+      endSlider.style.zIndex = "4";
+      slider.style.zIndex = "3";
+    });
+    slider.addEventListener("input", () => {
+      if (Number(endSlider.value) < Number(slider.value) + 0.5) {
+        endSlider.value = String(Math.min(Number(endSlider.max), Number(slider.value) + 0.5));
+      }
+      updateTrimFill();
+      persistSession();
+      queuePreviews("start");
+    });
+    endSlider.addEventListener("input", () => {
+      if (Number(endSlider.value) < Number(slider.value) + 0.5) {
+        slider.value = String(Math.max(0, Number(endSlider.value) - 0.5));
+      }
+      updateTrimFill();
+      persistSession();
+      queuePreviews("end");
+    });
+    function nudgeGlobal(el, dir) {
+      const next = snapTime(Number(el.value) + dir * globalStep());
+      el.value = String(Math.min(Number(el.max), Math.max(Number(el.min), next)));
+      el.dispatchEvent(new Event("input"));
+    }
+    holdRepeat($("startPrev"), () => nudgeGlobal(slider, -1));
+    holdRepeat($("startNext"), () => nudgeGlobal(slider, 1));
+    holdRepeat($("endPrev"), () => nudgeGlobal(endSlider, -1));
+    holdRepeat($("endNext"), () => nudgeGlobal(endSlider, 1));
+    bindStamp(clockStamp, () => ({
+      min: Number(slider.min),
+      max: Number(slider.max),
+      current: () => Number(slider.value),
+    }), (t) => {
+      slider.value = String(t);
+      slider.dispatchEvent(new Event("input"));
+    });
+    bindStamp(clockEndStamp, () => ({
+      min: Number(endSlider.min),
+      max: Number(endSlider.max),
+      current: () => Number(endSlider.value),
+    }), (t) => {
+      endSlider.value = String(t);
+      endSlider.dispatchEvent(new Event("input"));
+    });
+    slider.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { e.preventDefault(); nudgeGlobal(slider, -1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); nudgeGlobal(slider, 1); }
+    });
+    endSlider.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { e.preventDefault(); nudgeGlobal(endSlider, -1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); nudgeGlobal(endSlider, 1); }
+    });
+    $("all").addEventListener("click", () => {
+      if (running) return;
+      grid.querySelectorAll("input.pick").forEach((el) => {
+        el.checked = true;
+        el.closest(".tile").classList.remove("off");
+      });
+      applyRange();
+      persistSession();
+    });
+    $("none").addEventListener("click", () => {
+      if (running) return;
+      grid.querySelectorAll("input.pick").forEach((el) => {
+        el.checked = false;
+        el.closest(".tile").classList.add("off");
+      });
+      applyRange();
+      persistSession();
+    });
+    alignEl.addEventListener("change", () => {
+      persistSession();
+      applyRange();
+      refreshPreviews();
+    });
+    loopEl.addEventListener("change", persistSession);
+    resEl.addEventListener("change", persistSession);
+    overlayEl.addEventListener("change", () => {
+      if (overlayEl.checked) ensureOrigin();
+      paintOverlays();
+      persistSession();
+    });
+    overlayPosEl.addEventListener("change", () => {
+      paintOverlays();
+      persistSession();
+    });
+    originEl.addEventListener("input", () => {
+      paintOverlays();
+      persistSession();
+    });
+    originEl.addEventListener("change", persistSession);
+    jitterSecEl.addEventListener("change", persistSession);
+    jitterEl.addEventListener("click", jitterFeeds);
+    $("clearMarks").addEventListener("click", () => {
+      syncMarks = {};
+      syncRef = null;
+      localSeek = {};
+      alignEl.checked = false;
+      persistMarks();
+      grid.querySelectorAll("input.cam-seek").forEach((el) => { el.value = "0"; });
+      grid.querySelectorAll(".tile .stamp").forEach((el) => writeStamp(el, 0, true));
+      applyRange();
+      refreshPreviews();
+    });
+    $("load").addEventListener("click", loadFolder);
+    $("start").addEventListener("click", () => startAtSlider("start"));
+    $("seek").addEventListener("click", () => startAtSlider("seek"));
+    $("stop").addEventListener("click", stopStreams);
+    folderEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") loadFolder();
+    });
+    window.addEventListener("pointerup", () => { draggingSeek = null; });
+    window.addEventListener("pointercancel", () => { draggingSeek = null; });
+    bindStamp(lightboxStamp, () => ({
+      min: 0,
+      max: lightboxName ? durationOf(lightboxName) : 0,
+      current: () => lightboxName ? seekOf(lightboxName) : 0,
+    }), (t) => {
+      if (lightboxName && camApi[lightboxName]) camApi[lightboxName].applyTime(t, true);
+    });
+    $("lightboxSeek").addEventListener("pointerdown", () => { draggingSeek = "lightbox"; });
+    $("lightboxSeek").addEventListener("input", () => {
+      if (lightboxName && camApi[lightboxName]) {
+        camApi[lightboxName].applyTime(Number($("lightboxSeek").value), false);
+      }
+    });
+    holdRepeat($("lightboxPrev"), () => {
+      if (lightboxName && camApi[lightboxName]) camApi[lightboxName].nudge(-1);
+    });
+    holdRepeat($("lightboxNext"), () => {
+      if (lightboxName && camApi[lightboxName]) camApi[lightboxName].nudge(1);
+    });
+    $("lightboxSync").addEventListener("click", () => {
+      if (lightboxName && camApi[lightboxName]) camApi[lightboxName].setSync();
+    });
+    $("lightboxRef").addEventListener("click", () => {
+      if (lightboxName && camApi[lightboxName]) camApi[lightboxName].setRef();
+    });
+    $("lightboxClose").addEventListener("click", closeLightbox);
+    $("lightboxBackdrop").addEventListener("click", closeLightbox);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && lightboxName) {
+        e.preventDefault();
+        closeLightbox();
+      }
+    });
+
+    refreshStatus();
+    setInterval(() => {
+      if (document.hidden || busy || jittering) return;
+      api("/api/status").then((data) => {
+        const was = running;
+        running = !!data.running;
+        renderUrls(data.urls || []);
+        if (data.running) {
+          runStatus.textContent = "Streams running on this host.";
+          runStatus.className = "status ok";
+        } else if (was && !running) {
+          runStatus.textContent = "Streams stopped.";
+          runStatus.className = "status";
+        }
+        if (was !== running) applyRange();
+        else setControlLock();
+      }).catch(() => {});
+    }, 4000);
+  </script>
+</body>
+</html>
