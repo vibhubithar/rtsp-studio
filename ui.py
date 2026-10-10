@@ -23,6 +23,7 @@ STOP = ROOT / "stop.sh"
 STATE = ROOT / ".rtsp-state"
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm", ".ts", ".mts"}
 SYNC_FILE = "rtsp-sync.txt"
+PRESETS_FILE = "rtsp-presets.json"
 HOST = os.environ.get("UI_HOST", "0.0.0.0")
 PORT = int(os.environ.get("UI_PORT", "8787"))
 
@@ -36,6 +37,8 @@ FRAME_JOBS = {}
 FRAME_JOBS_LOCK = threading.Lock()
 FRAME_JOB_GEN = {}
 STREAM_LOCK = threading.Lock()
+CLIP_LOCK = threading.Lock()
+CLIP_STEM_RE = re.compile(r"^(.*)_clip(\d+)$")
 OVERLAY_CORNERS = ("top-left", "bottom-left", "top-right", "bottom-right")
 
 
@@ -207,7 +210,7 @@ def probe_media(path: Path) -> tuple[float, float]:
 def list_videos(folder: Path) -> list[dict]:
     videos = []
     for path in sorted(folder.iterdir()):
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTS:
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTS and not CLIP_STEM_RE.match(path.stem):
             duration, fps = probe_media(path)
             videos.append(
                 {
@@ -291,6 +294,46 @@ def save_sync(folder: str, marks: dict | None, ref: str | None, align: bool = Fa
     return {"marks": clean, "ref": ref_name, "align": bool(align), "path": str(dest), "has_file": True}
 
 
+def parse_presets(raw) -> list[dict]:
+    rows = []
+    if not isinstance(raw, list):
+        return rows
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = re.sub(r"\s+", " ", str(item.get("name") or "").strip())[:80]
+        if not name or name.lower() in seen:
+            continue
+        try:
+            start = float(item.get("start"))
+            end = float(item.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if end < start + 0.5:
+            continue
+        seen.add(name.lower())
+        rows.append({"name": name, "start": start, "end": end})
+    return rows[:80]
+
+
+def load_presets(folder: Path) -> list[dict]:
+    path = folder / PRESETS_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+    return parse_presets(data)
+
+
+def save_presets(folder: str, presets) -> list[dict]:
+    path = resolve_folder(folder)
+    rows = parse_presets(presets)
+    dest = path / PRESETS_FILE
+    dest.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    return rows
+
+
 def probe_folder(folder: str) -> dict:
     global CURRENT_FOLDER, PROBE_CACHE
     path = resolve_folder(folder)
@@ -310,6 +353,7 @@ def probe_folder(folder: str) -> dict:
         "align": saved["align"],
         "has_file": saved["has_file"],
         "sync_file": saved["path"],
+        "presets": load_presets(path),
     }
     return PROBE_CACHE
 
@@ -579,6 +623,146 @@ def start_from_session(session: dict | None = None) -> dict:
     )
 
 
+def next_clip_number(folder: Path) -> int:
+    highest = 0
+    try:
+        for path in folder.iterdir():
+            match = CLIP_STEM_RE.match(path.stem if path.is_file() else path.name)
+            if match:
+                highest = max(highest, int(match.group(2)))
+    except FileNotFoundError:
+        return 1
+    return highest + 1
+
+
+def aligned_file_window(
+    name: str,
+    start: float,
+    end: float,
+    marks: dict[str, float],
+    ref: str | None,
+    align: bool,
+) -> tuple[float, float]:
+    ss = float(start)
+    ee = float(end)
+    if align and ref and marks.get(name) is not None and marks.get(ref) is not None:
+        delta = float(marks[name]) - float(marks[ref])
+        ss += delta
+        ee += delta
+    if ss < 0:
+        raise ValueError(
+            f"{name} starts at {ss:.3f}s after alignment. Move start later on the reference timeline."
+        )
+    if ee < ss + 0.5:
+        raise ValueError(f"{name}: aligned range {ss:.3f}s–{ee:.3f}s is too short.")
+    return ss, ee
+
+
+def normalize_clip_height(value) -> int | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if not re.fullmatch(r"[0-9]+", raw):
+        raise ValueError("invalid height")
+    height = int(raw) - int(raw) % 2
+    if height < 144 or height > 4320:
+        raise ValueError("invalid height")
+    return height
+
+
+def cut_clip(src: Path, dest: Path, start: float, duration: float, height: int | None = None) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    ss = f"{start:.3f}"
+    dur = f"{duration:.3f}"
+    timeout = max(300.0, duration * 20.0 + 60.0) if height else max(120.0, duration * 4.0 + 30.0)
+    if not height:
+        copy_cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-ss", ss, "-i", str(src), "-t", dur,
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c", "copy", "-avoid_negative_ts", "make_zero",
+            str(dest),
+        ]
+        result = subprocess.run(copy_cmd, capture_output=True, text=True, check=False, timeout=timeout)
+        if result.returncode == 0 and dest.is_file() and dest.stat().st_size > 0:
+            return
+        if dest.exists():
+            dest.unlink()
+    encode_cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-ss", ss, "-i", str(src), "-t", dur,
+        "-map", "0:v:0", "-map", "0:a?",
+    ]
+    if height:
+        encode_cmd += ["-vf", f"scale=-2:{height}"]
+    encode_cmd += [
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-movflags", "+faststart",
+        str(dest),
+    ]
+    result = subprocess.run(encode_cmd, capture_output=True, text=True, check=False, timeout=timeout)
+    if result.returncode != 0 or not dest.is_file() or dest.stat().st_size == 0:
+        err = (result.stderr or result.stdout or "ffmpeg failed").strip().splitlines()
+        raise RuntimeError(f"{src.name}: " + (err[-1] if err else "clip export failed"))
+
+
+def export_clips(
+    folder: str,
+    offset: float,
+    end: float,
+    files: list[str],
+    marks: dict | None = None,
+    ref: str | None = None,
+    align: bool = False,
+    height: str | int | None = None,
+) -> dict:
+    global CURRENT_FOLDER
+    path = resolve_folder(folder)
+    CURRENT_FOLDER = path
+    names = [Path(str(name)).name for name in files]
+    if not names:
+        raise ValueError("Select at least one video")
+    if end < offset + 0.5:
+        raise ValueError("End time must be at least 0.5s after start.")
+    marks = {Path(str(key)).name: float(val) for key, val in (marks or {}).items()}
+    ref_name = Path(str(ref)).name if ref else None
+    use_align = bool(align and marks and ref_name)
+    if use_align:
+        missing = [name for name in names if name not in marks]
+        if missing:
+            raise ValueError("Missing sync mark for " + ", ".join(missing))
+        if ref_name not in marks:
+            raise ValueError(f"Reference camera '{ref_name}' has no sync mark.")
+    n = next_clip_number(path)
+    out_height = normalize_clip_height(height)
+    written: list[str] = []
+    for name in names:
+        src = path / name
+        if not src.is_file():
+            raise FileNotFoundError(name)
+        duration, _fps = probe_media(src)
+        ss, ee = aligned_file_window(name, offset, end, marks, ref_name, use_align)
+        if ee > duration:
+            ee = duration
+        if ee < ss + 0.5:
+            raise ValueError(f"{name} aligned range is past the end of the file.")
+        dest = path / f"{src.stem}_clip{n}{src.suffix.lower()}"
+        cut_clip(src, dest, ss, ee - ss, out_height)
+        written.append(str(dest))
+    save_ui_session({"folder": str(path), "clip": n, "height": str(out_height or "")})
+    label = f" at {out_height}p" if out_height else " at original resolution"
+    return {
+        "clip": n,
+        "folder": str(path),
+        "files": written,
+        "offset": float(offset),
+        "end": float(end),
+        "height": out_height,
+        "next_clip": n + 1,
+        "message": f"Saved {len(written)} synchronized clip{n} file(s){label} in {path}.",
+    }
+
+
 def jitter_streams(seconds: float) -> dict:
     if not running_ffmpeg():
         raise ValueError("Start feeds before jitter")
@@ -664,11 +848,20 @@ def status() -> dict:
         "overlay_pos": normalize_overlay_pos(session.get("overlay_pos")),
         "origin": str(session.get("origin") or ""),
         "jitter": 2.0,
+        "next_clip": 1,
+        "presets": [],
     }
     try:
         payload["jitter"] = parse_jitter_seconds(session.get("jitter", 2))
     except (TypeError, ValueError):
         payload["jitter"] = 2.0
+    if folder and Path(folder).expanduser().is_dir():
+        folder_path = Path(folder).expanduser().resolve()
+        try:
+            payload["next_clip"] = next_clip_number(folder_path)
+        except OSError:
+            payload["next_clip"] = 1
+        payload["presets"] = load_presets(folder_path)
     if folder and PROBE_CACHE and PROBE_CACHE.get("folder") == str(Path(folder).resolve()):
         payload["max_offset"] = PROBE_CACHE["max_offset"]
         payload["videos"] = PROBE_CACHE["videos"]
@@ -684,6 +877,7 @@ def status() -> dict:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    timeout = None
 
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
@@ -809,6 +1003,13 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/session":
                 self._send(200, save_ui_session(body))
                 return
+            if parsed.path == "/api/presets":
+                folder = str(body.get("folder") or "").strip()
+                if not folder:
+                    raise ValueError("folder is required")
+                rows = save_presets(folder, body.get("presets") or [])
+                self._send(200, {"presets": rows, "folder": str(resolve_folder(folder))})
+                return
             if parsed.path == "/api/jitter":
                 seconds = parse_jitter_seconds(body.get("seconds", body.get("jitter")))
                 if not STREAM_LOCK.acquire(blocking=False):
@@ -831,6 +1032,36 @@ class Handler(BaseHTTPRequestHandler):
                 ref = str(body.get("ref") or "").strip() or None
                 align = bool(body.get("align"))
                 self._send(200, save_sync(folder, marks, ref, align))
+                return
+            if parsed.path == "/api/clip":
+                folder = str(body.get("folder") or "").strip()
+                offset = float(body.get("offset") or 0)
+                end_raw = body.get("end", None)
+                end = float(end_raw) if end_raw not in (None, "") else None
+                files = body.get("files") or []
+                if not folder:
+                    raise ValueError("folder is required")
+                if end is None:
+                    raise ValueError("end time is required")
+                if not isinstance(files, list):
+                    raise ValueError("files must be a list")
+                files = [str(name) for name in files]
+                raw_marks = body.get("marks") or {}
+                if not isinstance(raw_marks, dict):
+                    raise ValueError("marks must be an object")
+                marks = {Path(str(key)).name: float(val) for key, val in raw_marks.items()}
+                ref = str(body.get("ref") or "").strip() or None
+                height = str(body.get("height") or "").strip()
+                if height and not re.fullmatch(r"[0-9]+", height):
+                    raise ValueError("invalid height")
+                if not CLIP_LOCK.acquire(blocking=False):
+                    raise RuntimeError("Clip export already in progress")
+                try:
+                    self._send(200, export_clips(
+                        folder, offset, end, files, marks, ref, bool(body.get("align")), height,
+                    ))
+                finally:
+                    CLIP_LOCK.release()
                 return
             if parsed.path == "/api/stop":
                 if not STREAM_LOCK.acquire(blocking=False):

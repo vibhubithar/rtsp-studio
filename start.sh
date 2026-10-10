@@ -286,7 +286,7 @@ fi
 
 mapfile -d '' -t videos < <(
   find "$VIDEO_DIR" -maxdepth 1 -type f -regextype posix-extended \
-    -iregex ".*\\.(${VIDEO_EXTS})\$" -print0 | sort -z
+    -iregex ".*\\.(${VIDEO_EXTS})\$" ! -iregex ".*_clip[0-9]+\\.(${VIDEO_EXTS})\$" -print0 | sort -z
 )
 
 if [ "${#videos[@]}" -eq 0 ]; then
