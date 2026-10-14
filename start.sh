@@ -33,6 +33,8 @@ are on the reference timeline; other files are shifted by (mark - ref mark).
 
 --overlay burns dd-mm-yyyy hh:mm:ss.sss on each RTSP feed.
 --overlay-pos CORNER is top-left, bottom-left, top-right, or bottom-right.
+--overlay-size SIZE is small, medium, large, or xlarge.
+--overlay-color COLOR is white, yellow, red, green, or blue.
 --origin-unix SECONDS is the wall clock at file 00:00:00 (host local time).
 Overlay forces a libx264 encode even when HEIGHT is omitted.
 
@@ -101,6 +103,8 @@ declare -A MARKS=()
 REF_NAME=""
 OVERLAY=0
 OVERLAY_POS="top-left"
+OVERLAY_SIZE="small"
+OVERLAY_COLOR="white"
 ORIGIN_UNIX=""
 if [ -z "${OVERLAY_FONT:-}" ]; then
   for _font in \
@@ -226,6 +230,30 @@ while [ $# -gt 0 ]; do
       OVERLAY_POS="${1#*=}"
       shift
       ;;
+    --overlay-size)
+      if [ -z "${2:-}" ]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      OVERLAY_SIZE="$2"
+      shift 2
+      ;;
+    --overlay-size=*)
+      OVERLAY_SIZE="${1#*=}"
+      shift
+      ;;
+    --overlay-color)
+      if [ -z "${2:-}" ]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      OVERLAY_COLOR="$2"
+      shift 2
+      ;;
+    --overlay-color=*)
+      OVERLAY_COLOR="${1#*=}"
+      shift
+      ;;
     --origin-unix)
       if [ -z "${2:-}" ]; then
         echo "Missing value for $1" >&2
@@ -257,6 +285,24 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+OVERLAY_POS="${OVERLAY_POS,,}"
+OVERLAY_POS="${OVERLAY_POS//_/-}"
+case "$OVERLAY_POS" in
+  top-left|bottom-left|top-right|bottom-right) ;;
+  *) OVERLAY_POS="top-left" ;;
+esac
+OVERLAY_SIZE="${OVERLAY_SIZE,,}"
+case "$OVERLAY_SIZE" in
+  small|medium|large|xlarge) ;;
+  extra-large|x-large|xl) OVERLAY_SIZE="xlarge" ;;
+  *) OVERLAY_SIZE="small" ;;
+esac
+OVERLAY_COLOR="${OVERLAY_COLOR,,}"
+case "$OVERLAY_COLOR" in
+  white|yellow|red|green|blue) ;;
+  *) OVERLAY_COLOR="white" ;;
+esac
 
 if [ -z "$VIDEO_DIR_ARG" ]; then
   usage >&2
@@ -521,6 +567,16 @@ for video in "${videos[@]}"; do
       [ "$fs" -lt 16 ] && fs=16
       [ "$fs" -gt 36 ] && fs=36
     fi
+    case "$OVERLAY_SIZE" in
+      medium) fs=$((fs * 3 / 2)) ;;
+      large) fs=$((fs * 2)) ;;
+      xlarge) fs=$((fs * 11 / 4)) ;;
+    esac
+    bw=2
+    case "$OVERLAY_SIZE" in
+      large) bw=3 ;;
+      xlarge) bw=4 ;;
+    esac
     wall_int=$(awk -v x="$wall_base" 'BEGIN{printf "%d", int(x)}')
     frac=$(awk -v x="$wall_base" 'BEGIN{printf "%.6f", x-int(x)}')
     case "$OVERLAY_POS" in
@@ -541,7 +597,7 @@ for video in "${videos[@]}"; do
         oy="10"
         ;;
     esac
-    vf_filters+=("drawtext=fontfile=${OVERLAY_FONT}:fontsize=${fs}:fontcolor=white:borderw=2:bordercolor=black:x=${ox}:y=${oy}:text='%{pts\\:localtime\\:${wall_int}\\:%d-%m-%Y %T}.%{eif\\:mod((t+${frac})*1000\\,1000)\\:d\\:3}'")
+    vf_filters+=("drawtext=fontfile=${OVERLAY_FONT}:fontsize=${fs}:fontcolor=${OVERLAY_COLOR}:borderw=${bw}:bordercolor=black:x=${ox}:y=${oy}:text='%{pts\\:localtime\\:${wall_int}\\:%d-%m-%Y %T}.%{eif\\:mod((t+${frac})*1000\\,1000)\\:d\\:3}'")
   fi
   if [ "${#vf_filters[@]}" -gt 0 ]; then
     bitrate="2500k"
@@ -640,6 +696,8 @@ printf '%s\n' "$LOOP_MODE" > "$STATE_DIR/loop"
 printf '%s\n' "$REF_NAME" > "$STATE_DIR/ref"
 printf '%s\n' "$OVERLAY" > "$STATE_DIR/overlay"
 printf '%s\n' "$OVERLAY_POS" > "$STATE_DIR/overlay-pos"
+printf '%s\n' "$OVERLAY_SIZE" > "$STATE_DIR/overlay-size"
+printf '%s\n' "$OVERLAY_COLOR" > "$STATE_DIR/overlay-color"
 printf '%s\n' "$ORIGIN_UNIX" > "$STATE_DIR/origin"
 : > "$STATE_DIR/marks"
 for mk in "${!MARKS[@]}"; do

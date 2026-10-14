@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RTSP sync scrubber</title>
+  <title>RTSP Studio</title>
   <style>
     :root {
       --bg: #12140f;
@@ -221,7 +221,10 @@
     .ts-overlay {
       position: absolute;
       z-index: 2;
-      font: 600 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      font-size: 13px;
+      line-height: 1.2;
       color: #fff;
       text-shadow: 0 0 3px #000, 0 1px 2px #000, 1px 0 2px #000, -1px 0 2px #000;
       pointer-events: none;
@@ -232,14 +235,26 @@
     .ts-overlay.bottom-left { bottom: 10px; left: 12px; }
     .ts-overlay.top-right { top: 10px; right: 12px; }
     .ts-overlay.bottom-right { bottom: 10px; right: 12px; }
-    .lightbox-card .ts-overlay { font-size: 20px; }
+    .ts-overlay.size-small { font-size: 13px; }
+    .ts-overlay.size-medium { font-size: 18px; }
+    .ts-overlay.size-large { font-size: 26px; }
+    .ts-overlay.size-xlarge { font-size: 36px; }
+    .ts-overlay.color-white { color: #fff; }
+    .ts-overlay.color-yellow { color: #ffe44d; }
+    .ts-overlay.color-red { color: #ff4d4d; }
+    .ts-overlay.color-green { color: #4dff6a; }
+    .ts-overlay.color-blue { color: #5aa8ff; }
+    .lightbox-card .ts-overlay.size-small { font-size: 20px; }
+    .lightbox-card .ts-overlay.size-medium { font-size: 28px; }
+    .lightbox-card .ts-overlay.size-large { font-size: 40px; }
+    .lightbox-card .ts-overlay.size-xlarge { font-size: 56px; }
     .lightbox-card .ts-overlay.top-left { top: 14px; left: 16px; }
     .lightbox-card .ts-overlay.bottom-left { bottom: 14px; left: 16px; }
     .lightbox-card .ts-overlay.top-right { top: 14px; right: 16px; }
     .lightbox-card .ts-overlay.bottom-right { bottom: 14px; right: 16px; }
     .overlay-opts { align-items: flex-end; margin-top: 12px; }
     .overlay-opts .grow { flex: 1; min-width: 220px; }
-    .overlay-opts select { flex: 0 0 170px; min-width: 170px; }
+    .overlay-opts select { flex: 0 0 140px; min-width: 120px; }
     input.jitter-sec {
       width: 8.5ch;
       min-width: 8.5ch;
@@ -428,6 +443,8 @@
       pointer-events: none;
     }
     body.streams-locked .tile img { pointer-events: auto; }
+    body.streams-locked .tile button.play-clip { pointer-events: auto; }
+    button.play-clip.sync-on { background: var(--accent); color: #14180c; }
     .check {
       display: flex;
       align-items: center;
@@ -460,8 +477,8 @@
 </head>
 <body>
   <main>
-    <h1>Sync scrubber</h1>
-    <p class="lede">Set sync on each camera at the same real-world moment. Use as ref on one camera only for offset math — start and end still apply to every feed. Start/Stop from any browser still runs the streams on this host.</p>
+    <h1>RTSP Studio</h1>
+    <p class="lede">Set sync on each camera at the same real-world moment. Use as ref on one camera only for offset math — it does not have to be published. Start and end still apply to every selected feed. Start/Stop from any browser still runs the streams on this host.</p>
     <p id="hostHint" class="hint" style="margin-top:-18px;margin-bottom:20px"></p>
 
     <section>
@@ -524,6 +541,7 @@
         </select>
         <button id="presetLoad" class="ghost" type="button">Load</button>
         <button id="presetDelete" class="ghost" type="button">Delete</button>
+        <button id="playClip" class="ghost play-clip" type="button" disabled>Play</button>
       </div>
       <label class="check">
         <input id="loop" type="checkbox" checked>
@@ -551,8 +569,27 @@
             <option value="bottom-right">Bottom right</option>
           </select>
         </div>
+        <div>
+          <label class="field" for="overlaySize">Size</label>
+          <select id="overlaySize" aria-label="Timestamp overlay size">
+            <option value="small" selected>Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+            <option value="xlarge">Extra large</option>
+          </select>
+        </div>
+        <div>
+          <label class="field" for="overlayColor">Color</label>
+          <select id="overlayColor" aria-label="Timestamp overlay color">
+            <option value="white" selected>White</option>
+            <option value="yellow">Yellow</option>
+            <option value="red">Red</option>
+            <option value="green">Green</option>
+            <option value="blue">Blue</option>
+          </select>
+        </div>
       </div>
-      <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original). Create clip writes a synchronized start→end cut of every selected camera into the same folder as *_clip1, then *_clip2 on the next press, using the resolution dropdown (Original copies, 720p/1080p/480p scales).</p>
+      <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end, and it does not need to be selected as a feed. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original). Create clip writes a synchronized start→end cut of every selected camera into the same folder as *_clip1, then *_clip2 on the next press, using the resolution dropdown (Original copies, 720p/1080p/480p scales).</p>
       <div class="row" style="margin-top: 14px;">
         <button id="start" type="button" disabled>Start from here</button>
         <button id="seek" class="ghost" type="button" disabled>Seek all</button>
@@ -606,6 +643,7 @@
           </div>
         </div>
         <div class="sync-tools lightbox-tools">
+          <button id="playLightbox" class="ghost play-clip" type="button">Play</button>
           <button id="lightboxSync" class="ghost" type="button">Set sync</button>
           <span id="lightboxSaved" class="sync-saved" hidden></span>
           <button id="lightboxRef" class="ghost" type="button">Use as ref</button>
@@ -623,6 +661,8 @@
     const alignEl = $("align");
     const overlayEl = $("overlay");
     const overlayPosEl = $("overlayPos");
+    const overlaySizeEl = $("overlaySize");
+    const overlayColorEl = $("overlayColor");
     const originEl = $("origin");
     const jitterSecEl = $("jitterSec");
     const jitterEl = $("jitter");
@@ -655,8 +695,17 @@
     let lightboxName = null;
     let jittering = false;
     let nextClip = 1;
+    let sessionReady = false;
+    let lastPreviewKey = "";
+    let playing = false;
+    let playTimer = 0;
+    let playOriginMs = 0;
+    let playOriginT = 0;
+    let playhead = 0;
     const camApi = {};
     const OVERLAY_CORNERS = ["top-left", "bottom-left", "top-right", "bottom-right"];
+    const OVERLAY_SIZES = ["small", "medium", "large", "xlarge"];
+    const OVERLAY_COLORS = ["white", "yellow", "red", "green", "blue"];
 
     const savedFolder = localStorage.getItem("rtspFolder");
     if (savedFolder) folderEl.value = savedFolder;
@@ -881,28 +930,39 @@
     }
 
     function persistMarks() {
-      persistSession();
+      persistSession(true);
     }
 
-    function sessionPayload() {
+    function sessionPayload(opts) {
       const seeks = {};
       videoMeta.forEach((v) => { seeks[v.name] = seekOf(v.name); });
-      return {
+      const payload = {
         folder: folderEl.value.trim(),
         height: resEl.value,
         offset: Number(slider.value) || 0,
         end: Number(endSlider.value) || 0,
         loop: loopEl.checked,
         align: alignEl.checked,
-        selected: selectedNames(),
-        marks: syncMarks,
-        ref: syncRef,
+        selected: selectedNames().length ? selectedNames() : (savedSelected || []),
         seeks,
         overlay: overlayEl.checked,
         overlay_pos: overlayPosEl.value,
+        overlay_size: overlaySizeEl.value,
+        overlay_color: overlayColorEl.value,
         origin: originEl.value,
         jitter: Number(jitterSecEl.value) || 2,
       };
+      const clear = !!(opts && opts.clearMarks);
+      if (clear) {
+        payload.marks = {};
+        payload.ref = null;
+        payload.align = false;
+        payload.clear_marks = true;
+      } else if (Object.keys(syncMarks).length || syncRef) {
+        payload.marks = syncMarks;
+        payload.ref = syncRef;
+      }
+      return payload;
     }
 
     function renderPresetList() {
@@ -960,6 +1020,7 @@
 
     function loadSelectedPreset() {
       if (running) return;
+      stopPlayback();
       const idx = Number(presetListEl.value);
       const row = presets[idx];
       if (!row) return;
@@ -971,8 +1032,14 @@
         endSlider.value = String(Math.min(max, Number(slider.value) + 0.5));
       }
       presetNameEl.value = row.name;
-      persistSession();
+      previewMode = "start";
+      previewFrom = "start";
+      paintMarkerSelect();
+      setClocks();
+      persistSession(true);
       queuePreviews("start");
+      refreshPreviews();
+      if (lightboxName) syncLightbox();
     }
 
     async function deleteSelectedPreset() {
@@ -983,19 +1050,21 @@
       await persistPresets();
     }
 
-    function persistSession() {
+    function persistSession(immediate, opts) {
       const folder = folderEl.value.trim();
-      if (!folder || running || busy) return;
+      if (!folder || running || !sessionReady || !videoMeta.length) return;
       localStorage.setItem(marksKey(), JSON.stringify({ marks: syncMarks, ref: syncRef, align: alignEl.checked }));
       localStorage.setItem("rtspFolder", folder);
-      clearTimeout(sessionTimer);
-      sessionTimer = setTimeout(() => {
+      const send = () => {
         api("/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(sessionPayload()),
+          body: JSON.stringify(sessionPayload(opts)),
         }).catch(() => {});
-      }, 250);
+      };
+      clearTimeout(sessionTimer);
+      if (immediate === true) send();
+      else sessionTimer = setTimeout(send, 250);
     }
 
     function restoreMarksFromLocal() {
@@ -1011,23 +1080,19 @@
     }
 
     function applySavedSync(data) {
-      if (data && data.has_file) {
-        syncMarks = { ...(data.marks || {}) };
+      if (!data) return;
+      const serverMarks = (data.marks && typeof data.marks === "object") ? data.marks : {};
+      const serverSeeks = (data.seeks && typeof data.seeks === "object") ? data.seeks : {};
+      const hasServer = !!(data.folder || data.has_file || Object.keys(serverMarks).length || data.ref
+        || Object.keys(serverSeeks).length);
+      if (hasServer) {
+        syncMarks = { ...serverMarks };
         syncRef = data.ref || null;
-        alignEl.checked = !!data.align;
-      } else if (data && (Object.keys(data.marks || {}).length || data.ref)) {
-        syncMarks = { ...(data.marks || {}) };
-        syncRef = data.ref || null;
-        if (data.align) alignEl.checked = true;
+        if ("align" in data) alignEl.checked = !!data.align;
       } else {
         restoreMarksFromLocal();
-        if (Object.keys(syncMarks).length || syncRef) persistSession();
       }
-      if (data && data.seeks && Object.keys(data.seeks).length) {
-        localSeek = { ...syncMarks, ...data.seeks };
-      } else {
-        localSeek = { ...syncMarks };
-      }
+      localSeek = { ...syncMarks, ...serverSeeks };
     }
 
     function seekOf(name) {
@@ -1037,6 +1102,7 @@
     }
 
     function previewTime(name) {
+      if (playing) return clampTime(name, fileTime(name, playhead));
       if (previewMode === "end") return clampTime(name, fileTime(name, Number(endSlider.value)));
       if (previewMode === "start") return clampTime(name, fileTime(name, Number(slider.value)));
       return seekOf(name);
@@ -1076,18 +1142,85 @@
     }
 
     function refName() {
-      const files = selectedNames();
-      if (syncRef && files.includes(syncRef) && syncMarks[syncRef] != null) return syncRef;
+      if (syncRef && syncMarks[syncRef] != null) return syncRef;
       return null;
     }
 
     function marksComplete() {
       const files = selectedNames();
-      return files.length > 0 && files.every((n) => syncMarks[n] != null);
+      if (!files.length || files.some((n) => syncMarks[n] == null)) return false;
+      if (syncRef && syncMarks[syncRef] == null) return false;
+      return true;
+    }
+
+    function alignMarks() {
+      const marks = {};
+      selectedNames().forEach((n) => {
+        if (syncMarks[n] != null) marks[n] = syncMarks[n];
+      });
+      const ref = refName();
+      if (ref != null) marks[ref] = syncMarks[ref];
+      return marks;
     }
 
     function alignOn() {
       return alignEl.checked && marksComplete() && refName() != null;
+    }
+
+    function playRange() {
+      const start = Number(slider.value);
+      const end = Number(endSlider.value);
+      return { start, end, span: Math.max(0.5, end - start) };
+    }
+
+    function playheadNow() {
+      const range = playRange();
+      const elapsed = (Date.now() - playOriginMs) / 1000;
+      return range.start + ((playOriginT - range.start + elapsed) % range.span);
+    }
+
+    function paintPlayButtons() {
+      const label = playing ? "Stop" : "Play";
+      document.querySelectorAll("button.play-clip").forEach((btn) => {
+        btn.textContent = label;
+        btn.classList.toggle("sync-on", playing);
+        btn.title = playing
+          ? "Stop looping the start→end clip"
+          : "Play the start→end clip in a loop";
+      });
+    }
+
+    function stopPlayback() {
+      playing = false;
+      clearTimeout(playTimer);
+      playTimer = 0;
+      paintPlayButtons();
+      paintSyncLabels();
+    }
+
+    function togglePlayback() {
+      if (playing) {
+        stopPlayback();
+        return;
+      }
+      const range = playRange();
+      if (!(range.end >= range.start + 0.5) || !previewImgs.length) return;
+      playing = true;
+      playOriginMs = Date.now();
+      playOriginT = range.start;
+      playhead = range.start;
+      paintPlayButtons();
+      tickPlayback();
+    }
+
+    async function tickPlayback() {
+      if (!playing) return;
+      playhead = playheadNow();
+      paintOverlays();
+      syncLightbox();
+      await Promise.all(previewImgs.map((img) => loadFrame(img, previewTime(img.dataset.name))));
+      if (!playing) return;
+      playTimer = setTimeout(tickPlayback, 220);
     }
 
     function fileTime(name, timelineT) {
@@ -1159,7 +1292,7 @@
         const mark = syncMarks[name];
         const shown = previewTime(name);
         if (stamp) writeStamp(stamp, seekOf(name));
-        const kind = previewMode === "end" ? "end" : previewMode === "start" ? "start" : "sync";
+        const kind = playing ? "play" : previewMode === "end" ? "end" : previewMode === "start" ? "start" : "sync";
         let text = kind + " " + fmt(shown);
         if (kind !== "sync" && mark != null) text += " · sync " + fmt(mark);
         else if (mark == null) text += " · no sync mark";
@@ -1214,9 +1347,23 @@
       return OVERLAY_CORNERS.includes(v) ? v : "top-left";
     }
 
-    function applyOverlayCorner(el) {
+    function overlaySize() {
+      const v = overlaySizeEl.value;
+      return OVERLAY_SIZES.includes(v) ? v : "small";
+    }
+
+    function overlayColor() {
+      const v = overlayColorEl.value;
+      return OVERLAY_COLORS.includes(v) ? v : "white";
+    }
+
+    function applyOverlayLook(el) {
       const corner = overlayCorner();
+      const size = overlaySize();
+      const color = overlayColor();
       OVERLAY_CORNERS.forEach((c) => el.classList.toggle(c, c === corner));
+      OVERLAY_SIZES.forEach((s) => el.classList.toggle("size-" + s, s === size));
+      OVERLAY_COLORS.forEach((c) => el.classList.toggle("color-" + c, c === color));
     }
 
     function paintOverlays() {
@@ -1225,13 +1372,13 @@
         const el = tile.querySelector(".ts-overlay");
         const name = tile.querySelector("input.pick")?.dataset.name;
         if (!el || !name) return;
-        applyOverlayCorner(el);
+        applyOverlayLook(el);
         el.hidden = !on;
         if (on) el.textContent = wallStamp(previewTime(name));
       });
       const lb = $("lightboxOverlay");
       if (lb) {
-        applyOverlayCorner(lb);
+        applyOverlayLook(lb);
         lb.hidden = !on || !lightboxName;
         if (on && lightboxName) lb.textContent = wallStamp(previewTime(lightboxName));
       }
@@ -1284,7 +1431,7 @@
       const noRange = !(max > min);
       slider.step = "any";
       endSlider.step = "any";
-      const canAlign = marksComplete() && !!syncRef && selectedNames().includes(syncRef);
+      const canAlign = marksComplete() && refName() != null;
       if (!running && !canAlign) alignEl.checked = false;
       setClocks();
       syncTileSliders();
@@ -1295,7 +1442,7 @@
     function setControlLock(noRange, canAlign) {
       if (noRange == null) noRange = !(Number(slider.max) > Number(slider.min));
       if (canAlign == null) {
-        canAlign = marksComplete() && !!syncRef && selectedNames().includes(syncRef);
+        canAlign = marksComplete() && refName() != null;
       }
       const locked = running || busy;
       document.body.classList.toggle("streams-locked", running);
@@ -1305,6 +1452,8 @@
       loopEl.disabled = locked;
       overlayEl.disabled = locked;
       overlayPosEl.disabled = locked;
+      overlaySizeEl.disabled = locked;
+      overlayColorEl.disabled = locked;
       originEl.disabled = locked;
       jitterSecEl.disabled = busy;
       jitterEl.disabled = busy || !running;
@@ -1314,6 +1463,9 @@
       $("presetSave").disabled = locked || noRange;
       $("presetLoad").disabled = locked || !presetListEl.value;
       $("presetDelete").disabled = locked || !presetListEl.value;
+      const canPlay = !busy && !noRange && previewImgs.length > 0;
+      $("playClip").disabled = !canPlay && !playing;
+      $("playLightbox").disabled = !canPlay && !playing;
       ["load", "all", "none", "clearMarks", "startPrev", "startNext", "endPrev", "endNext",
         "lightboxPrev", "lightboxNext", "lightboxSync", "lightboxRef"].forEach((id) => {
         const el = $(id);
@@ -1334,6 +1486,7 @@
         el.disabled = locked;
       });
       if (!locked) paintSyncButtons();
+      paintPlayButtons();
     }
 
     function syncTileSliders() {
@@ -1377,7 +1530,7 @@
         const wrap = document.createElement("div");
         wrap.className = "preview-wrap";
         const ts = document.createElement("div");
-        ts.className = "ts-overlay " + overlayCorner();
+        ts.className = "ts-overlay " + overlayCorner() + " size-" + overlaySize() + " color-" + overlayColor();
         ts.hidden = true;
         wrap.append(img, ts);
         const cap = document.createElement("div");
@@ -1440,12 +1593,19 @@
         nextBtn.setAttribute("aria-label", "Next frame for " + v.name);
         const seekControls = document.createElement("div");
         seekControls.className = "seek-row";
-        seekControls.append(prevBtn, camSeek, nextBtn);
+        const playBtn = document.createElement("button");
+        playBtn.className = "ghost play-clip";
+        playBtn.type = "button";
+        playBtn.textContent = playing ? "Stop" : "Play";
+        playBtn.title = "Play the start→end clip in a loop";
+        playBtn.addEventListener("click", togglePlayback);
+        seekControls.append(prevBtn, camSeek, nextBtn, playBtn);
         seekWrap.append(seekRow, seekControls);
         const meta = document.createElement("div");
         meta.className = "sync-meta";
         const applyTime = (t, immediate) => {
           if (running) return;
+          stopPlayback();
           previewMode = "sync";
           previewFrom = "start";
           paintMarkerSelect();
@@ -1595,7 +1755,7 @@
       const syncT = Math.min(dur, seekOf(name));
       const shown = previewTime(name);
       $("lightboxTitle").textContent = name;
-      const label = previewMode === "end" ? "End" : previewMode === "start" ? "Start" : "Sync point";
+      const label = playing ? "Play" : previewMode === "end" ? "End" : previewMode === "start" ? "Start" : "Sync point";
       $("lightboxFps").textContent = label + " · " + (Math.round(fpsOf(name) * 100) / 100) + " fps";
       ["lightboxStart", "lightboxSeek", "lightboxEnd"].forEach((id) => {
         const el = $(id);
@@ -1642,6 +1802,7 @@
 
     function applyLightboxTime(t, immediate) {
       if (!lightboxName || running) return;
+      stopPlayback();
       t = snapTime(Math.min(durationOf(lightboxName), Math.max(0, t)));
       if (previewMode === "start" || previewMode === "end") {
         const timeline = snapTime(timelineFromFile(lightboxName, t));
@@ -1723,16 +1884,63 @@
       return data;
     }
 
-    async function applyProbe(data) {
-      applySavedSync(data);
+    function videosChanged(videos) {
+      const next = (videos || []).map((v) => v.name).join("\n");
+      const now = videoMeta.map((v) => v.name).join("\n");
+      return next !== now;
+    }
+
+    function previewKey(data) {
+      return [
+        data && data.offset,
+        data && data.end,
+        JSON.stringify((data && data.marks) || {}),
+        JSON.stringify((data && data.seeks) || {}),
+        data && data.ref,
+        data && data.align,
+      ].join("|");
+    }
+
+    async function applySharedState(data, opts) {
+      const rebuild = !!(opts && opts.rebuild);
+      const refreshFrames = !!(opts && opts.refreshFrames);
+      if (!data) return;
+      if (data.folder) folderEl.value = data.folder;
+      if (data.height != null) resEl.value = String(data.height);
+      if (data.loop === false) loopEl.checked = false;
+      if (data.loop === true) loopEl.checked = true;
+      if (data.overlay) overlayEl.checked = true;
+      if (data.overlay === false) overlayEl.checked = false;
+      if (data.origin) originEl.value = String(data.origin).slice(0, 19);
+      if (data.overlay_pos && OVERLAY_CORNERS.includes(data.overlay_pos)) overlayPosEl.value = data.overlay_pos;
+      if (data.overlay_size && OVERLAY_SIZES.includes(data.overlay_size)) overlaySizeEl.value = data.overlay_size;
+      if (data.overlay_color && OVERLAY_COLORS.includes(data.overlay_color)) overlayColorEl.value = data.overlay_color;
+      if (data.jitter != null && Number(data.jitter) > 0) jitterSecEl.value = String(data.jitter);
+      if (data.next_clip) nextClip = Number(data.next_clip) || nextClip;
       if (data.presets) applyPresets(data.presets);
-      if (!originEl.value) originEl.value = defaultOriginValue(data.videos);
-      renderGrid(data.videos);
+      if (data.selected && data.selected.length) savedSelected = data.selected;
+      applySavedSync(data);
+      if (data.videos && data.videos.length && (rebuild || !videoMeta.length || videosChanged(data.videos))) {
+        if (!originEl.value) originEl.value = defaultOriginValue(data.videos);
+        renderGrid(data.videos);
+        const names = data.videos.map((v) => v.name + " (" + fmt(v.duration) + ")").join(", ");
+        const n = data.count ?? data.videos.length;
+        probeStatus.textContent = n + " video(s) in folder. Check the ones to publish. " + names;
+      }
+      if (data.offset != null && draggingSeek == null) slider.value = String(data.offset);
       applyRange();
-      const names = data.videos.map((v) => v.name + " (" + fmt(v.duration) + ")").join(", ");
-      const n = data.count ?? (data.videos || []).length;
-      probeStatus.textContent = n + " video(s) in folder. Check the ones to publish. " + names;
-      await refreshPreviews();
+      if (data.end != null && draggingSeek == null) {
+        endSlider.value = String(Math.min(Number(endSlider.max), data.end));
+        setClocks();
+      }
+      sessionReady = true;
+      applyRange();
+      if (refreshFrames) await refreshPreviews();
+    }
+
+    async function applyProbe(data) {
+      sessionReady = true;
+      await applySharedState(data, { rebuild: true, refreshFrames: true });
     }
 
     async function loadFolder() {
@@ -1742,13 +1950,13 @@
         probeStatus.textContent = "Enter a folder path.";
         return;
       }
+      stopPlayback();
       setBusy(true);
       probeStatus.textContent = "Reading video durations…";
       try {
-        savedSelected = null;
         const data = await api("/api/probe?folder=" + encodeURIComponent(folder));
         await applyProbe(data);
-        persistSession();
+        persistSession(true);
       } catch (err) {
         probeStatus.textContent = err.message;
         renderGrid([]);
@@ -1787,14 +1995,13 @@
           files,
         };
         if (alignOn()) {
-          const ref = refName();
-          const marks = {};
-          files.forEach((n) => { marks[n] = syncMarks[n]; });
-          payload.marks = marks;
-          payload.ref = ref;
+          payload.marks = alignMarks();
+          payload.ref = refName();
         }
         payload.overlay = overlayEl.checked;
         payload.overlay_pos = overlayCorner();
+        payload.overlay_size = overlaySize();
+        payload.overlay_color = overlayColor();
         if (payload.overlay) ensureOrigin();
         payload.origin = originEl.value;
         payload.jitter = Number(jitterSecEl.value) || 2;
@@ -1858,11 +2065,8 @@
           align: alignOn(),
         };
         if (alignOn()) {
-          const ref = refName();
-          const marks = {};
-          files.forEach((n) => { marks[n] = syncMarks[n]; });
-          payload.marks = marks;
-          payload.ref = ref;
+          payload.marks = alignMarks();
+          payload.ref = refName();
         }
         const data = await api("/api/clip", {
           method: "POST",
@@ -1924,35 +2128,13 @@
         if (data.ui_url) {
           $("hostHint").textContent = "Open " + data.ui_url + " from other machines. Start still runs the feeds on this host.";
         }
-        if (data.folder) folderEl.value = data.folder;
-        if (data.height != null) resEl.value = String(data.height);
-        if (data.loop === false) loopEl.checked = false;
-        if (data.loop === true) loopEl.checked = true;
-        if (data.overlay) overlayEl.checked = true;
-        if (data.overlay === false) overlayEl.checked = false;
-        if (data.origin) originEl.value = String(data.origin).slice(0, 19);
-        if (data.overlay_pos && OVERLAY_CORNERS.includes(data.overlay_pos)) overlayPosEl.value = data.overlay_pos;
-        if (data.jitter != null && Number(data.jitter) > 0) jitterSecEl.value = String(data.jitter);
-        if (data.next_clip) nextClip = Number(data.next_clip) || 1;
-        if (data.presets) applyPresets(data.presets);
-        if (data.selected && data.selected.length) savedSelected = data.selected;
-        if (data.seeks) Object.keys(data.seeks).forEach((name) => { localSeek[name] = data.seeks[name]; });
-        if (data.videos && data.videos.length) {
-          if (data.offset != null) slider.value = String(data.offset);
-          await applyProbe(data);
-          if (data.end != null) endSlider.value = String(data.end);
-          applyRange();
-          if (data.end != null) endSlider.value = String(Math.min(Number(endSlider.max), data.end));
-          setClocks();
-          if (alignOn()) await refreshPreviews();
-        }
+        await applySharedState(data, { rebuild: true, refreshFrames: true });
         running = !!data.running;
         renderUrls(data.urls || []);
         if (data.running) {
           runStatus.textContent = "Streams running on this host.";
           runStatus.className = "status ok";
         }
-        applyRange();
         setBusy(false);
       } catch (_) {
         setBusy(false);
@@ -1970,6 +2152,7 @@
       setPreviewMode("end", false);
     });
     slider.addEventListener("input", () => {
+      stopPlayback();
       if (Number(endSlider.value) < Number(slider.value) + 0.5) {
         endSlider.value = String(Math.min(Number(endSlider.max), Number(slider.value) + 0.5));
       }
@@ -1978,6 +2161,7 @@
       queuePreviews("start");
     });
     endSlider.addEventListener("input", () => {
+      stopPlayback();
       if (Number(endSlider.value) < Number(slider.value) + 0.5) {
         slider.value = String(Math.max(0, Number(endSlider.value) - 0.5));
       }
@@ -2052,6 +2236,14 @@
       paintOverlays();
       persistSession();
     });
+    overlaySizeEl.addEventListener("change", () => {
+      paintOverlays();
+      persistSession();
+    });
+    overlayColorEl.addEventListener("change", () => {
+      paintOverlays();
+      persistSession();
+    });
     originEl.addEventListener("input", () => {
       paintOverlays();
       persistSession();
@@ -2063,6 +2255,8 @@
       saveCurrentPreset().catch((err) => { runError.textContent = err.message; });
     });
     $("presetLoad").addEventListener("click", loadSelectedPreset);
+    $("playClip").addEventListener("click", togglePlayback);
+    $("playLightbox").addEventListener("click", togglePlayback);
     $("presetDelete").addEventListener("click", () => {
       deleteSelectedPreset().catch((err) => { runError.textContent = err.message; });
     });
@@ -2073,11 +2267,12 @@
       el.addEventListener("click", () => setPreviewMode(el.dataset.mode));
     });
     $("clearMarks").addEventListener("click", () => {
+      stopPlayback();
       syncMarks = {};
       syncRef = null;
       localSeek = {};
       alignEl.checked = false;
-      persistMarks();
+      persistSession(true, { clearMarks: true });
       grid.querySelectorAll("input.cam-seek").forEach((el) => { el.value = "0"; });
       grid.querySelectorAll(".tile .stamp").forEach((el) => writeStamp(el, 0, true));
       applyRange();
@@ -2146,12 +2341,15 @@
 
     refreshStatus();
     setInterval(() => {
-      if (document.hidden || busy || jittering) return;
-      api("/api/status").then((data) => {
+      if (document.hidden || busy || jittering || draggingSeek) return;
+      api("/api/status").then(async (data) => {
         const was = running;
         running = !!data.running;
-        if (data.next_clip) nextClip = Number(data.next_clip) || nextClip;
-        if (Array.isArray(data.presets) && !running) applyPresets(data.presets);
+        const rebuild = !videoMeta.length || videosChanged(data.videos);
+        const key = previewKey(data);
+        const framesChanged = key !== lastPreviewKey;
+        lastPreviewKey = key;
+        await applySharedState(data, { rebuild, refreshFrames: !playing && (rebuild || framesChanged) });
         renderUrls(data.urls || []);
         if (data.running) {
           runStatus.textContent = "Streams running on this host.";
@@ -2160,8 +2358,7 @@
           runStatus.textContent = "Streams stopped.";
           runStatus.className = "status";
         }
-        if (was !== running) applyRange();
-        else setControlLock();
+        setControlLock();
       }).catch(() => {});
     }, 4000);
   </script>

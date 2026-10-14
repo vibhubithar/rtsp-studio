@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install runtime dependencies for rtsp-folder-streamer on a clean machine.
+# Install runtime dependencies for RTSP Studio on a clean machine.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"

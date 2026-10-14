@@ -40,6 +40,8 @@ STREAM_LOCK = threading.Lock()
 CLIP_LOCK = threading.Lock()
 CLIP_STEM_RE = re.compile(r"^(.*)_clip(\d+)$")
 OVERLAY_CORNERS = ("top-left", "bottom-left", "top-right", "bottom-right")
+OVERLAY_SIZES = ("small", "medium", "large", "xlarge")
+OVERLAY_COLORS = ("white", "yellow", "red", "green", "blue")
 
 
 def normalize_overlay_pos(value) -> str:
@@ -56,6 +58,28 @@ def normalize_overlay_pos(value) -> str:
     }
     raw = aliases.get(raw, raw)
     return raw if raw in OVERLAY_CORNERS else "top-left"
+
+
+def normalize_overlay_size(value) -> str:
+    raw = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
+    aliases = {
+        "s": "small",
+        "m": "medium",
+        "l": "large",
+        "xl": "xlarge",
+        "extra-large": "xlarge",
+        "x-large": "xlarge",
+        "extra": "xlarge",
+    }
+    raw = aliases.get(raw, raw)
+    return raw if raw in OVERLAY_SIZES else "small"
+
+
+def normalize_overlay_color(value) -> str:
+    raw = str(value or "").strip().lower()
+    aliases = {"yello": "yellow", "yelow": "yellow"}
+    raw = aliases.get(raw, raw)
+    return raw if raw in OVERLAY_COLORS else "white"
 
 
 def parse_jitter_seconds(value) -> float:
@@ -134,9 +158,11 @@ def save_ui_session(body: dict) -> dict:
         current["align"] = bool(body["align"])
     if "selected" in body and isinstance(body["selected"], list):
         current["selected"] = [Path(str(name)).name for name in body["selected"]]
-    if "marks" in body and isinstance(body["marks"], dict):
-        current["marks"] = {Path(str(key)).name: float(val) for key, val in body["marks"].items()}
-    if "ref" in body:
+    clear_marks = bool(body.get("clear_marks"))
+    incoming_marks = _float_name_map(body["marks"]) if "marks" in body else None
+    if incoming_marks is not None and (incoming_marks or clear_marks):
+        current["marks"] = incoming_marks
+    if "ref" in body and (clear_marks or incoming_marks):
         ref = str(body.get("ref") or "").strip()
         current["ref"] = Path(ref).name if ref else None
     if "seeks" in body and isinstance(body["seeks"], dict):
@@ -145,12 +171,17 @@ def save_ui_session(body: dict) -> dict:
         current["overlay"] = bool(body["overlay"])
     if "overlay_pos" in body:
         current["overlay_pos"] = normalize_overlay_pos(body.get("overlay_pos"))
+    if "overlay_size" in body:
+        current["overlay_size"] = normalize_overlay_size(body.get("overlay_size"))
+    if "overlay_color" in body:
+        current["overlay_color"] = normalize_overlay_color(body.get("overlay_color"))
     if "origin" in body:
         current["origin"] = str(body.get("origin") or "").strip()
     if "jitter" in body and body["jitter"] not in (None, ""):
         current["jitter"] = parse_jitter_seconds(body["jitter"])
     (STATE / "ui.json").write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
-    if folder and Path(folder).expanduser().is_dir() and any(k in body for k in ("marks", "ref", "align")):
+    should_write_sync = bool(clear_marks or incoming_marks)
+    if folder and Path(folder).expanduser().is_dir() and should_write_sync:
         save_sync(
             folder,
             current.get("marks") or {},
@@ -278,6 +309,52 @@ def load_sync(folder: Path) -> dict:
     return data
 
 
+def _float_name_map(raw) -> dict[str, float]:
+    out: dict[str, float] = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, val in raw.items():
+        base = Path(str(key)).name
+        if not base or base in {".", ".."}:
+            continue
+        try:
+            out[base] = float(val)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def merged_sync(folder: Path | None, session: dict) -> dict:
+    saved = {
+        "marks": {},
+        "ref": None,
+        "align": False,
+        "path": "",
+        "has_file": False,
+    }
+    if folder is not None and folder.is_dir():
+        saved = load_sync(folder)
+    session_marks = _float_name_map(session.get("marks"))
+    marks = {**saved["marks"], **session_marks} if session_marks else dict(saved["marks"])
+    session_ref = str(session.get("ref") or "").strip()
+    ref = Path(session_ref).name if session_ref else saved["ref"]
+    if ref in {"", "-", "none"}:
+        ref = None
+    if "align" in session:
+        align = bool(session.get("align"))
+    else:
+        align = bool(saved["align"])
+    seeks = _float_name_map(session.get("seeks"))
+    return {
+        "marks": marks,
+        "ref": ref,
+        "align": align,
+        "has_file": bool(saved["has_file"] or marks or ref),
+        "path": saved.get("path") or "",
+        "seeks": seeks,
+    }
+
+
 def save_sync(folder: str, marks: dict | None, ref: str | None, align: bool = False) -> dict:
     path = resolve_folder(folder)
     clean = {}
@@ -342,17 +419,18 @@ def probe_folder(folder: str) -> dict:
         raise ValueError(f"No video files in {path}")
     CURRENT_FOLDER = path
     max_offset = min(v["duration"] for v in videos)
-    saved = load_sync(path)
+    merged = merged_sync(path, load_ui_session())
     PROBE_CACHE = {
         "folder": str(path),
         "count": len(videos),
         "max_offset": max_offset,
         "videos": videos,
-        "marks": saved["marks"],
-        "ref": saved["ref"],
-        "align": saved["align"],
-        "has_file": saved["has_file"],
-        "sync_file": saved["path"],
+        "marks": merged["marks"],
+        "ref": merged["ref"],
+        "align": merged["align"],
+        "has_file": merged["has_file"],
+        "sync_file": merged["path"],
+        "seeks": merged["seeks"],
         "presets": load_presets(path),
     }
     return PROBE_CACHE
@@ -509,6 +587,8 @@ def start_streams(
     overlay: bool = False,
     origin: str | float | None = None,
     overlay_pos: str | None = None,
+    overlay_size: str | None = None,
+    overlay_color: str | None = None,
 ) -> dict:
     global CURRENT_FOLDER
     CURRENT_FOLDER = Path(folder).expanduser().resolve()
@@ -530,8 +610,15 @@ def start_streams(
             cmd += ["--mark", f"{base}={float(t):.3f}"]
         cmd += ["--ref", Path(str(ref)).name]
     overlay_pos = normalize_overlay_pos(overlay_pos)
+    overlay_size = normalize_overlay_size(overlay_size)
+    overlay_color = normalize_overlay_color(overlay_color)
     if overlay:
-        cmd += ["--overlay", "--overlay-pos", overlay_pos]
+        cmd += [
+            "--overlay",
+            "--overlay-pos", overlay_pos,
+            "--overlay-size", overlay_size,
+            "--overlay-color", overlay_color,
+        ]
         origin_unix = parse_origin_unix(origin)
         if origin_unix is not None:
             cmd += ["--origin-unix", f"{origin_unix:.3f}"]
@@ -576,6 +663,8 @@ def start_streams(
         "overlay": overlay,
         "origin": origin,
         "overlay_pos": overlay_pos,
+        "overlay_size": overlay_size,
+        "overlay_color": overlay_color,
     }
 
 
@@ -620,6 +709,8 @@ def start_from_session(session: dict | None = None) -> dict:
         bool(session.get("overlay")),
         session.get("origin") or "",
         session.get("overlay_pos"),
+        session.get("overlay_size"),
+        session.get("overlay_color"),
     )
 
 
@@ -790,29 +881,23 @@ def status() -> dict:
     selected = session.get("selected")
     if not isinstance(selected, list) or not selected:
         selected = [line for line in read_text(STATE / "selected").splitlines() if line.strip()]
-    marks: dict[str, float] = {}
-    ref = ""
-    align = bool(session.get("align"))
-    has_file = False
-    if folder and Path(folder).expanduser().is_dir():
-        saved = load_sync(Path(folder).expanduser().resolve())
-        marks = saved["marks"] or (session.get("marks") if isinstance(session.get("marks"), dict) else {})
-        ref = saved["ref"] or session.get("ref") or ""
-        align = saved["align"] if saved["has_file"] else align
-        has_file = saved["has_file"]
+    folder_path = Path(folder).expanduser().resolve() if folder else None
+    if folder_path is not None and not folder_path.is_dir():
+        folder_path = None
+    merged = merged_sync(folder_path, session)
+    marks = merged["marks"]
+    ref = merged["ref"] or ""
+    align = merged["align"]
+    has_file = merged["has_file"]
     if not marks:
-        session_marks = session.get("marks")
-        if isinstance(session_marks, dict):
-            marks = {str(k): float(v) for k, v in session_marks.items()}
-        else:
-            for line in read_text(STATE / "marks").splitlines():
-                parts = line.rsplit(" ", 1)
-                if len(parts) == 2:
-                    try:
-                        marks[parts[0]] = float(parts[1])
-                    except ValueError:
-                        pass
-        ref = session.get("ref") or read_text(STATE / "ref")
+        for line in read_text(STATE / "marks").splitlines():
+            parts = line.rsplit(" ", 1)
+            if len(parts) == 2:
+                try:
+                    marks[parts[0]] = float(parts[1])
+                except ValueError:
+                    pass
+        ref = ref or read_text(STATE / "ref")
     urls = [
         line.strip()
         for line in read_text(STATE / "urls").splitlines()
@@ -837,7 +922,9 @@ def status() -> dict:
         "ref": ref,
         "align": align,
         "has_file": has_file,
-        "seeks": session.get("seeks") if isinstance(session.get("seeks"), dict) else {},
+        "seeks": merged["seeks"] or (
+            session.get("seeks") if isinstance(session.get("seeks"), dict) else {}
+        ),
         "urls": urls if running_ffmpeg() else [],
         "running": running_ffmpeg(),
         "max_offset": 0.0,
@@ -846,6 +933,8 @@ def status() -> dict:
         "ui_url": f"http://{detect_lan_ip()}:{PORT}",
         "overlay": bool(session.get("overlay")),
         "overlay_pos": normalize_overlay_pos(session.get("overlay_pos")),
+        "overlay_size": normalize_overlay_size(session.get("overlay_size")),
+        "overlay_color": normalize_overlay_color(session.get("overlay_color")),
         "origin": str(session.get("origin") or ""),
         "jitter": 2.0,
         "next_clip": 1,
@@ -971,6 +1060,8 @@ class Handler(BaseHTTPRequestHandler):
                 ref = str(body.get("ref") or "").strip() or None
                 overlay = bool(body.get("overlay"))
                 overlay_pos = normalize_overlay_pos(body.get("overlay_pos"))
+                overlay_size = normalize_overlay_size(body.get("overlay_size"))
+                overlay_color = normalize_overlay_color(body.get("overlay_color"))
                 origin = str(body.get("origin") or "").strip()
                 if overlay and origin:
                     parse_origin_unix(origin)
@@ -987,6 +1078,8 @@ class Handler(BaseHTTPRequestHandler):
                     "seeks": body.get("seeks") or {},
                     "overlay": overlay,
                     "overlay_pos": overlay_pos,
+                    "overlay_size": overlay_size,
+                    "overlay_color": overlay_color,
                     "origin": origin,
                     "jitter": body.get("jitter"),
                 })
@@ -995,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self._send(200, start_streams(
                         folder, height, offset, end, loop, files, marks or None, ref,
-                        overlay, origin, overlay_pos,
+                        overlay, origin, overlay_pos, overlay_size, overlay_color,
                     ))
                 finally:
                     STREAM_LOCK.release()
@@ -1082,14 +1175,14 @@ def main() -> None:
         sys.exit("start.sh not found")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     lan = detect_lan_ip()
-    print(f"Sync UI: http://127.0.0.1:{PORT}", flush=True)
+    print(f"RTSP Studio: http://127.0.0.1:{PORT}", flush=True)
     if lan not in {"127.0.0.1", "localhost"}:
         print(f"         http://{lan}:{PORT}", flush=True)
     print("Start from the web UI publishes RTSP on this machine.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopped UI server.")
+        print("\nStopped RTSP Studio.")
 
 
 if __name__ == "__main__":
