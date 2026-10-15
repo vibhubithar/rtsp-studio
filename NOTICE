@@ -1,0 +1,50 @@
+RTSP Studio
+Copyright 2026 Vibhu
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file in this repository.
+
+This NOTICE file is provided for attribution. It does not modify the License.
+
+--------------------------------------------------------------------------
+Third-party software
+
+RTSP Studio's original source is Apache-2.0. The following components are
+separate works with their own licenses. They are not Apache-2.0 merely
+because this project uses them. Redistributors must preserve those licenses
+and any notices that accompany the components they ship.
+
+MediaMTX
+  Copyright (c) the MediaMTX authors
+  https://github.com/bluenviron/mediamtx
+  License: MIT
+  install.sh downloads a MediaMTX binary into vendor/mediamtx (not stored
+  in this git tree). The MIT license text is included with the MediaMTX
+  release. That binary is a separate program, not a derivative of RTSP
+  Studio.
+
+FFmpeg
+  Copyright (c) the FFmpeg developers
+  https://ffmpeg.org/
+  License: LGPL 2.1 or later, or GPL 2 or later, depending on how the
+  binary was built. Many distribution packages (including those with
+  libx264) are GPL.
+  RTSP Studio starts ffmpeg and ffprobe as external processes. It does
+  not link against libav*. Ship FFmpeg under the license of the build you
+  install, and include its COPYING / LICENSE files when you redistribute
+  that binary.
+
+libx264 (optional, used when ffmpeg encodes)
+  Copyright (c) the x264 developers / VideoLAN
+  License: GPL-2.0-or-later
+  Required for scaled output, timestamp overlay, and IR encodes.
+
+Python 3
+  Copyright (c) Python Software Foundation
+  License: PSF License Agreement
+  Runtime interpreter only.
+
+DejaVu / Liberation / FreeMono fonts (timestamp overlay)
+  System fonts used by ffmpeg drawtext. DejaVu Sans Mono is typically
+  Bitstream Vera (with DejaVu modifications). Those font licenses remain
+  with the font packages; they are not part of this source tree.
