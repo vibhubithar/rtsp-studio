@@ -38,10 +38,22 @@ FRAME_JOBS_LOCK = threading.Lock()
 FRAME_JOB_GEN = {}
 STREAM_LOCK = threading.Lock()
 CLIP_LOCK = threading.Lock()
+CLIP_PROGRESS_LOCK = threading.Lock()
+CLIP_PROGRESS = {
+    "running": False,
+    "done": 0,
+    "total": 0,
+    "current": "",
+    "file_frac": 0.0,
+    "percent": 0.0,
+    "message": "",
+    "error": None,
+}
 CLIP_STEM_RE = re.compile(r"^(.*)_clip(\d+)$")
 OVERLAY_CORNERS = ("top-left", "bottom-left", "top-right", "bottom-right")
 OVERLAY_SIZES = ("small", "medium", "large", "xlarge")
 OVERLAY_COLORS = ("white", "yellow", "red", "green", "blue")
+IR_STYLES = ("thermal", "night")
 
 
 def normalize_overlay_pos(value) -> str:
@@ -80,6 +92,21 @@ def normalize_overlay_color(value) -> str:
     aliases = {"yello": "yellow", "yelow": "yellow"}
     raw = aliases.get(raw, raw)
     return raw if raw in OVERLAY_COLORS else "white"
+
+
+def normalize_ir_style(value) -> str:
+    raw = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
+    aliases = {
+        "heat": "thermal",
+        "inferno": "thermal",
+        "thermo": "thermal",
+        "nv": "night",
+        "green": "night",
+        "night-vision": "night",
+        "nightvision": "night",
+    }
+    raw = aliases.get(raw, raw)
+    return raw if raw in IR_STYLES else "thermal"
 
 
 def parse_jitter_seconds(value) -> float:
@@ -160,11 +187,20 @@ def save_ui_session(body: dict) -> dict:
         current["selected"] = [Path(str(name)).name for name in body["selected"]]
     clear_marks = bool(body.get("clear_marks"))
     incoming_marks = _float_name_map(body["marks"]) if "marks" in body else None
-    if incoming_marks is not None and (incoming_marks or clear_marks):
-        current["marks"] = incoming_marks
-    if "ref" in body and (clear_marks or incoming_marks):
+    if clear_marks:
+        current["marks"] = incoming_marks or {}
+    elif incoming_marks:
+        existing = _float_name_map(current.get("marks"))
+        if folder and Path(folder).expanduser().is_dir():
+            existing = {**load_sync(Path(folder).expanduser().resolve())["marks"], **existing}
+        current["marks"] = {**existing, **incoming_marks}
+    if clear_marks:
         ref = str(body.get("ref") or "").strip()
         current["ref"] = Path(ref).name if ref else None
+    elif "ref" in body:
+        ref = str(body.get("ref") or "").strip()
+        if ref:
+            current["ref"] = Path(ref).name
     if "seeks" in body and isinstance(body["seeks"], dict):
         current["seeks"] = {Path(str(key)).name: float(val) for key, val in body["seeks"].items()}
     if "overlay" in body:
@@ -175,6 +211,10 @@ def save_ui_session(body: dict) -> dict:
         current["overlay_size"] = normalize_overlay_size(body.get("overlay_size"))
     if "overlay_color" in body:
         current["overlay_color"] = normalize_overlay_color(body.get("overlay_color"))
+    if "ir" in body:
+        current["ir"] = bool(body["ir"])
+    if "ir_style" in body:
+        current["ir_style"] = normalize_ir_style(body.get("ir_style"))
     if "origin" in body:
         current["origin"] = str(body.get("origin") or "").strip()
     if "jitter" in body and body["jitter"] not in (None, ""):
@@ -238,20 +278,29 @@ def probe_media(path: Path) -> tuple[float, float]:
     return duration, fps
 
 
+def is_derived_clip(path: Path) -> bool:
+    match = CLIP_STEM_RE.match(path.stem)
+    if not match:
+        return False
+    original = path.with_name(match.group(1) + path.suffix)
+    return original.is_file()
+
+
 def list_videos(folder: Path) -> list[dict]:
     videos = []
     for path in sorted(folder.iterdir()):
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTS and not CLIP_STEM_RE.match(path.stem):
-            duration, fps = probe_media(path)
-            videos.append(
-                {
-                    "name": path.name,
-                    "path": str(path),
-                    "duration": duration,
-                    "fps": fps,
-                    "mtime": path.stat().st_mtime,
-                }
-            )
+        if not (path.is_file() and path.suffix.lower() in VIDEO_EXTS) or is_derived_clip(path):
+            continue
+        duration, fps = probe_media(path)
+        videos.append(
+            {
+                "name": path.name,
+                "path": str(path),
+                "duration": duration,
+                "fps": fps,
+                "mtime": path.stat().st_mtime,
+            }
+        )
     return videos
 
 
@@ -416,7 +465,14 @@ def probe_folder(folder: str) -> dict:
     path = resolve_folder(folder)
     videos = list_videos(path)
     if not videos:
-        raise ValueError(f"No video files in {path}")
+        subdirs = [p.name for p in sorted(path.iterdir()) if p.is_dir() and not p.name.startswith(".")]
+        hint = f"No video files in {path}"
+        if subdirs:
+            hint += ". Subfolders: " + ", ".join(subdirs[:12])
+            if len(subdirs) > 12:
+                hint += ", …"
+            hint += ". Load one of those folders if the cameras live there."
+        raise ValueError(hint)
     CURRENT_FOLDER = path
     max_offset = min(v["duration"] for v in videos)
     merged = merged_sync(path, load_ui_session())
@@ -589,6 +645,8 @@ def start_streams(
     overlay_pos: str | None = None,
     overlay_size: str | None = None,
     overlay_color: str | None = None,
+    ir: bool = False,
+    ir_style: str | None = None,
 ) -> dict:
     global CURRENT_FOLDER
     CURRENT_FOLDER = Path(folder).expanduser().resolve()
@@ -612,6 +670,7 @@ def start_streams(
     overlay_pos = normalize_overlay_pos(overlay_pos)
     overlay_size = normalize_overlay_size(overlay_size)
     overlay_color = normalize_overlay_color(overlay_color)
+    ir_style = normalize_ir_style(ir_style)
     if overlay:
         cmd += [
             "--overlay",
@@ -622,6 +681,8 @@ def start_streams(
         origin_unix = parse_origin_unix(origin)
         if origin_unix is not None:
             cmd += ["--origin-unix", f"{origin_unix:.3f}"]
+    if ir:
+        cmd += ["--ir", "--ir-style", ir_style]
     result = subprocess.run(
         cmd,
         cwd=str(ROOT),
@@ -649,6 +710,8 @@ def start_streams(
         message = message[:-1] + f" aligned to {Path(str(ref)).name}."
     if overlay:
         message = message[:-1] + " with timestamp overlay."
+    if ir:
+        message = message[:-1] + f" plus {ir_style} IR channels."
     return {
         "urls": urls,
         "offset": float(offset),
@@ -665,6 +728,8 @@ def start_streams(
         "overlay_pos": overlay_pos,
         "overlay_size": overlay_size,
         "overlay_color": overlay_color,
+        "ir": ir,
+        "ir_style": ir_style,
     }
 
 
@@ -711,7 +776,38 @@ def start_from_session(session: dict | None = None) -> dict:
         session.get("overlay_pos"),
         session.get("overlay_size"),
         session.get("overlay_color"),
+        bool(session.get("ir")),
+        session.get("ir_style"),
     )
+
+
+def sanitize_preset_folder(name: str) -> str:
+    raw = re.sub(r"\s+", " ", str(name or "").strip())[:80]
+    if not raw:
+        raise ValueError("Name the start/end preset first.")
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw)
+    cleaned = re.sub(r"-+", "-", cleaned).strip(".-")
+    if not cleaned or cleaned in {".", ".."}:
+        raise ValueError("invalid preset name")
+    return cleaned
+
+
+def ir_video_filters(style: str, height: int | None) -> list[str]:
+    out_h = height or 720
+    filters = [f"scale=-2:{out_h}"]
+    if normalize_ir_style(style) == "night":
+        filters += [
+            "hue=s=0",
+            "eq=contrast=1.2:brightness=0.04",
+            "colorchannelmixer=rr=0.05:rg=0:rb=0:gr=0.15:gg=0.8:gb=0.05:br=0:bg=0.2:bb=0.05",
+        ]
+    else:
+        filters += [
+            "format=gray",
+            "eq=contrast=1.2:gamma=0.85",
+            "pseudocolor=preset=inferno",
+        ]
+    return filters
 
 
 def next_clip_number(folder: Path) -> int:
@@ -761,12 +857,100 @@ def normalize_clip_height(value) -> int | None:
     return height
 
 
-def cut_clip(src: Path, dest: Path, start: float, duration: float, height: int | None = None) -> None:
+def clip_progress() -> dict:
+    with CLIP_PROGRESS_LOCK:
+        data = dict(CLIP_PROGRESS)
+    total = max(int(data.get("total") or 0), 0)
+    done = max(int(data.get("done") or 0), 0)
+    frac = max(0.0, min(1.0, float(data.get("file_frac") or 0)))
+    data["percent"] = round(min(100.0, 100.0 * (done + frac) / total), 1) if total else 0.0
+    return data
+
+
+def set_clip_progress(**kwargs) -> None:
+    with CLIP_PROGRESS_LOCK:
+        CLIP_PROGRESS.update(kwargs)
+
+
+def run_clip_ffmpeg(
+    cmd: list[str],
+    duration: float,
+    timeout: float,
+    on_progress=None,
+) -> tuple[int, str]:
+    argv = list(cmd[:-1]) + ["-nostats", "-progress", "pipe:1", cmd[-1]]
+    proc = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    err_chunks: list[str] = []
+
+    def drain_err() -> None:
+        try:
+            err_chunks.append(proc.stderr.read() or "")
+        except Exception:
+            pass
+
+    threading.Thread(target=drain_err, daemon=True).start()
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            if time.monotonic() > deadline:
+                proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                return 1, "clip export timed out"
+            line = proc.stdout.readline() if proc.stdout else ""
+            if line:
+                if line.startswith("out_time_us="):
+                    raw = line.split("=", 1)[1].strip()
+                    if raw.isdigit() and duration > 0 and on_progress:
+                        on_progress(min(1.0, int(raw) / 1_000_000.0 / duration))
+                elif line.startswith("progress=") and "end" in line and on_progress:
+                    on_progress(1.0)
+                continue
+            if proc.poll() is not None:
+                break
+            time.sleep(0.04)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+    code = proc.poll()
+    if code is None:
+        code = proc.wait(timeout=5)
+    return int(code), "".join(err_chunks)
+
+
+def cut_clip(
+    src: Path,
+    dest: Path,
+    start: float,
+    duration: float,
+    height: int | None = None,
+    vf: list[str] | None = None,
+    on_progress=None,
+) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     ss = f"{start:.3f}"
     dur = f"{duration:.3f}"
-    timeout = max(300.0, duration * 20.0 + 60.0) if height else max(120.0, duration * 4.0 + 30.0)
-    if not height:
+    filters = [item for item in (vf or []) if item]
+    must_encode = bool(height or filters)
+    timeout = max(300.0, duration * 20.0 + 60.0) if must_encode else max(120.0, duration * 4.0 + 30.0)
+
+    def progress(frac: float) -> None:
+        if on_progress:
+            on_progress(frac)
+
+    if not must_encode:
         copy_cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
             "-ss", ss, "-i", str(src), "-t", dur,
@@ -774,8 +958,9 @@ def cut_clip(src: Path, dest: Path, start: float, duration: float, height: int |
             "-c", "copy", "-avoid_negative_ts", "make_zero",
             str(dest),
         ]
-        result = subprocess.run(copy_cmd, capture_output=True, text=True, check=False, timeout=timeout)
-        if result.returncode == 0 and dest.is_file() and dest.stat().st_size > 0:
+        code, err = run_clip_ffmpeg(copy_cmd, duration, timeout, progress)
+        if code == 0 and dest.is_file() and dest.stat().st_size > 0:
+            progress(1.0)
             return
         if dest.exists():
             dest.unlink()
@@ -784,17 +969,21 @@ def cut_clip(src: Path, dest: Path, start: float, duration: float, height: int |
         "-ss", ss, "-i", str(src), "-t", dur,
         "-map", "0:v:0", "-map", "0:a?",
     ]
-    if height:
-        encode_cmd += ["-vf", f"scale=-2:{height}"]
+    vf_chain = list(filters)
+    if height and not any(part.startswith("scale=") for part in vf_chain):
+        vf_chain.insert(0, f"scale=-2:{height}")
+    if vf_chain:
+        encode_cmd += ["-vf", ",".join(vf_chain)]
     encode_cmd += [
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-movflags", "+faststart",
         str(dest),
     ]
-    result = subprocess.run(encode_cmd, capture_output=True, text=True, check=False, timeout=timeout)
-    if result.returncode != 0 or not dest.is_file() or dest.stat().st_size == 0:
-        err = (result.stderr or result.stdout or "ffmpeg failed").strip().splitlines()
-        raise RuntimeError(f"{src.name}: " + (err[-1] if err else "clip export failed"))
+    code, err = run_clip_ffmpeg(encode_cmd, duration, timeout, progress)
+    if code != 0 or not dest.is_file() or dest.stat().st_size == 0:
+        lines = (err or "ffmpeg failed").strip().splitlines()
+        raise RuntimeError(f"{src.name}: " + (lines[-1] if lines else "clip export failed"))
+    progress(1.0)
 
 
 def export_clips(
@@ -806,6 +995,9 @@ def export_clips(
     ref: str | None = None,
     align: bool = False,
     height: str | int | None = None,
+    preset: str | None = None,
+    ir: bool = False,
+    ir_style: str | None = None,
 ) -> dict:
     global CURRENT_FOLDER
     path = resolve_folder(folder)
@@ -815,6 +1007,10 @@ def export_clips(
         raise ValueError("Select at least one video")
     if end < offset + 0.5:
         raise ValueError("End time must be at least 0.5s after start.")
+    preset_dir_name = sanitize_preset_folder(preset or "")
+    dest_dir = path / preset_dir_name
+    if dest_dir.resolve() == path.resolve() or path.resolve() not in dest_dir.resolve().parents:
+        raise ValueError("invalid preset folder")
     marks = {Path(str(key)).name: float(val) for key, val in (marks or {}).items()}
     ref_name = Path(str(ref)).name if ref else None
     use_align = bool(align and marks and ref_name)
@@ -824,34 +1020,78 @@ def export_clips(
             raise ValueError("Missing sync mark for " + ", ".join(missing))
         if ref_name not in marks:
             raise ValueError(f"Reference camera '{ref_name}' has no sync mark.")
-    n = next_clip_number(path)
     out_height = normalize_clip_height(height)
+    ir_style = normalize_ir_style(ir_style)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    total = len(names) * (2 if ir else 1)
+    set_clip_progress(
+        running=True, done=0, total=total, current="", file_frac=0.0,
+        percent=0.0, message="", error=None,
+    )
     written: list[str] = []
-    for name in names:
-        src = path / name
-        if not src.is_file():
-            raise FileNotFoundError(name)
-        duration, _fps = probe_media(src)
-        ss, ee = aligned_file_window(name, offset, end, marks, ref_name, use_align)
-        if ee > duration:
-            ee = duration
-        if ee < ss + 0.5:
-            raise ValueError(f"{name} aligned range is past the end of the file.")
-        dest = path / f"{src.stem}_clip{n}{src.suffix.lower()}"
-        cut_clip(src, dest, ss, ee - ss, out_height)
-        written.append(str(dest))
-    save_ui_session({"folder": str(path), "clip": n, "height": str(out_height or "")})
-    label = f" at {out_height}p" if out_height else " at original resolution"
-    return {
-        "clip": n,
-        "folder": str(path),
-        "files": written,
-        "offset": float(offset),
-        "end": float(end),
-        "height": out_height,
-        "next_clip": n + 1,
-        "message": f"Saved {len(written)} synchronized clip{n} file(s){label} in {path}.",
-    }
+
+    def note_file(label: str) -> None:
+        set_clip_progress(current=label, file_frac=0.0)
+
+    def note_frac(frac: float) -> None:
+        set_clip_progress(file_frac=max(0.0, min(1.0, float(frac))))
+
+    try:
+        for name in names:
+            src = path / name
+            if not src.is_file():
+                raise FileNotFoundError(name)
+            duration, _fps = probe_media(src)
+            ss, ee = aligned_file_window(name, offset, end, marks, ref_name, use_align)
+            if ee > duration:
+                ee = duration
+            if ee < ss + 0.5:
+                raise ValueError(f"{name} aligned range is past the end of the file.")
+            cam_dir = dest_dir / src.stem
+            if dest_dir.resolve() not in cam_dir.resolve().parents:
+                raise ValueError("invalid camera folder")
+            cam_dir.mkdir(parents=True, exist_ok=True)
+            color_dest = cam_dir / f"{src.stem}{src.suffix.lower()}"
+            note_file(f"{src.stem}/{color_dest.name}")
+            cut_clip(src, color_dest, ss, ee - ss, out_height, on_progress=note_frac)
+            written.append(str(color_dest))
+            set_clip_progress(done=len(written), file_frac=0.0)
+            if ir:
+                ir_dest = cam_dir / f"{src.stem}_ir_{ir_style}.mp4"
+                note_file(f"{src.stem}/{ir_dest.name}")
+                cut_clip(
+                    src, ir_dest, ss, ee - ss, None,
+                    ir_video_filters(ir_style, out_height), note_frac,
+                )
+                written.append(str(ir_dest))
+                set_clip_progress(done=len(written), file_frac=0.0)
+        save_ui_session({
+            "folder": str(path),
+            "height": str(out_height or ""),
+            "ir": ir,
+            "ir_style": ir_style,
+        })
+        label = f" at {out_height}p" if out_height else " at original resolution"
+        extra = f", plus {ir_style} IR" if ir else ""
+        message = f"Saved {len(written)} file(s){label}{extra} in {dest_dir}."
+        set_clip_progress(
+            running=False, done=len(written), total=total, file_frac=0.0,
+            current="", message=message, error=None,
+        )
+        return {
+            "folder": str(dest_dir),
+            "preset": preset_dir_name,
+            "files": written,
+            "offset": float(offset),
+            "end": float(end),
+            "height": out_height,
+            "ir": ir,
+            "ir_style": ir_style,
+            "message": message,
+        }
+    except Exception as exc:
+        set_clip_progress(running=False, error=str(exc), file_frac=0.0)
+        raise
 
 
 def jitter_streams(seconds: float) -> dict:
@@ -935,10 +1175,13 @@ def status() -> dict:
         "overlay_pos": normalize_overlay_pos(session.get("overlay_pos")),
         "overlay_size": normalize_overlay_size(session.get("overlay_size")),
         "overlay_color": normalize_overlay_color(session.get("overlay_color")),
+        "ir": bool(session.get("ir")),
+        "ir_style": normalize_ir_style(session.get("ir_style")),
         "origin": str(session.get("origin") or ""),
         "jitter": 2.0,
         "next_clip": 1,
         "presets": [],
+        "clip_progress": clip_progress(),
     }
     try:
         payload["jitter"] = parse_jitter_seconds(session.get("jitter", 2))
@@ -993,6 +1236,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/status":
             self._send(200, status())
+            return
+        if parsed.path == "/api/clip-progress":
+            self._send(200, clip_progress())
             return
         if parsed.path == "/api/probe":
             folder = (parse_qs(parsed.query).get("folder") or [""])[0]
@@ -1062,6 +1308,8 @@ class Handler(BaseHTTPRequestHandler):
                 overlay_pos = normalize_overlay_pos(body.get("overlay_pos"))
                 overlay_size = normalize_overlay_size(body.get("overlay_size"))
                 overlay_color = normalize_overlay_color(body.get("overlay_color"))
+                ir = bool(body.get("ir"))
+                ir_style = normalize_ir_style(body.get("ir_style"))
                 origin = str(body.get("origin") or "").strip()
                 if overlay and origin:
                     parse_origin_unix(origin)
@@ -1080,6 +1328,8 @@ class Handler(BaseHTTPRequestHandler):
                     "overlay_pos": overlay_pos,
                     "overlay_size": overlay_size,
                     "overlay_color": overlay_color,
+                    "ir": ir,
+                    "ir_style": ir_style,
                     "origin": origin,
                     "jitter": body.get("jitter"),
                 })
@@ -1089,6 +1339,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, start_streams(
                         folder, height, offset, end, loop, files, marks or None, ref,
                         overlay, origin, overlay_pos, overlay_size, overlay_color,
+                        ir, ir_style,
                     ))
                 finally:
                     STREAM_LOCK.release()
@@ -1147,11 +1398,15 @@ class Handler(BaseHTTPRequestHandler):
                 height = str(body.get("height") or "").strip()
                 if height and not re.fullmatch(r"[0-9]+", height):
                     raise ValueError("invalid height")
+                preset = str(body.get("preset") or body.get("preset_name") or "").strip()
+                ir = bool(body.get("ir"))
+                ir_style = normalize_ir_style(body.get("ir_style"))
                 if not CLIP_LOCK.acquire(blocking=False):
                     raise RuntimeError("Clip export already in progress")
                 try:
                     self._send(200, export_clips(
                         folder, offset, end, files, marks, ref, bool(body.get("align")), height,
+                        preset, ir, ir_style,
                     ))
                 finally:
                     CLIP_LOCK.release()

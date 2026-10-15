@@ -38,6 +38,10 @@ are on the reference timeline; other files are shifted by (mark - ref mark).
 --origin-unix SECONDS is the wall clock at file 00:00:00 (host local time).
 Overlay forces a libx264 encode even when HEIGHT is omitted.
 
+--ir also publishes a simulated IR feed per camera at <path>_ir.
+--ir-style STYLE is thermal (heatmap) or night (green night vision).
+IR always encodes. If HEIGHT is omitted, IR is 720p so the color feed can stay 4K copy.
+
   $0 /home/vibhu/Santa-Clara-test-Videos --res 720 --offset 90 --end 180 --only SITE1-channel-2.mp4
   $0 ... --mark SITE1-channel-2.mp4=120.5 --mark SITE1-channel-4.mp4=123.1 --ref SITE1-channel-2.mp4
 
@@ -106,6 +110,8 @@ OVERLAY_POS="top-left"
 OVERLAY_SIZE="small"
 OVERLAY_COLOR="white"
 ORIGIN_UNIX=""
+IR=0
+IR_STYLE="thermal"
 if [ -z "${OVERLAY_FONT:-}" ]; then
   for _font in \
     /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf \
@@ -266,6 +272,24 @@ while [ $# -gt 0 ]; do
       ORIGIN_UNIX="${1#*=}"
       shift
       ;;
+    --ir)
+      IR=1
+      shift
+      ;;
+    --ir-style)
+      if [ -z "${2:-}" ]; then
+        echo "Missing value for $1" >&2
+        exit 1
+      fi
+      IR=1
+      IR_STYLE="$2"
+      shift 2
+      ;;
+    --ir-style=*)
+      IR=1
+      IR_STYLE="${1#*=}"
+      shift
+      ;;
     -*)
       echo "Unknown option: $1" >&2
       usage >&2
@@ -303,6 +327,13 @@ case "$OVERLAY_COLOR" in
   white|yellow|red|green|blue) ;;
   *) OVERLAY_COLOR="white" ;;
 esac
+IR_STYLE="${IR_STYLE,,}"
+IR_STYLE="${IR_STYLE//_/-}"
+case "$IR_STYLE" in
+  thermal|heat|inferno) IR_STYLE="thermal" ;;
+  night|nv|green|night-vision|nightvision) IR_STYLE="night" ;;
+  *) IR_STYLE="thermal" ;;
+esac
 
 if [ -z "$VIDEO_DIR_ARG" ]; then
   usage >&2
@@ -332,8 +363,24 @@ fi
 
 mapfile -d '' -t videos < <(
   find "$VIDEO_DIR" -maxdepth 1 -type f -regextype posix-extended \
-    -iregex ".*\\.(${VIDEO_EXTS})\$" ! -iregex ".*_clip[0-9]+\\.(${VIDEO_EXTS})\$" -print0 | sort -z
+    -iregex ".*\\.(${VIDEO_EXTS})\$" -print0 | sort -z
 )
+if [ "${#videos[@]}" -gt 0 ]; then
+  kept=()
+  for video in "${videos[@]}"; do
+    bn=$(basename -- "$video")
+    stem=${bn%.*}
+    ext=${bn##*.}
+    if [[ "$stem" =~ ^(.*)_clip[0-9]+$ ]]; then
+      orig="$VIDEO_DIR/${BASH_REMATCH[1]}.$ext"
+      if [ -f "$orig" ]; then
+        continue
+      fi
+    fi
+    kept+=("$video")
+  done
+  videos=("${kept[@]}")
+fi
 
 if [ "${#videos[@]}" -eq 0 ]; then
   echo "No video files found in $VIDEO_DIR" >&2
@@ -428,6 +475,18 @@ rtsp_path_from_file() {
   printf '%s' "$path"
 }
 
+claim_rtsp_path() {
+  local path="$1"
+  local base="$path"
+  local n=2
+  while [ -n "${used_paths[$path]:-}" ]; do
+    path="${base}_${n}"
+    n=$((n + 1))
+  done
+  used_paths[$path]=1
+  printf '%s' "$path"
+}
+
 wait_for_port() {
   local port="$1"
   local attempts="${2:-40}"
@@ -480,6 +539,9 @@ if [ -n "$END_OFFSET" ]; then
     echo "Playing ${START_OFFSET}s → ${END_OFFSET}s once"
   fi
 fi
+if [ "$IR" = 1 ]; then
+  echo "Also publishing ${IR_STYLE} IR at <path>_ir"
+fi
 echo
 
 video_codec() {
@@ -496,34 +558,23 @@ bitrate_for_height() {
   esac
 }
 
-for video in "${videos[@]}"; do
-  path=$(rtsp_path_from_file "$video")
-  base=$path
-  n=2
-  while [ -n "${used_paths[$path]:-}" ]; do
-    path="${base}_${n}"
-    n=$((n + 1))
-  done
-  used_paths[$path]=1
+publish_feed() {
+  local video="$1"
+  local path="$2"
+  local file_ss="$3"
+  local file_ee="$4"
+  local kind="${5:-color}"
+  local url publish logfile
+  local cfile seg_dur runfile ffmpeg_pid
+  local bitrate codec ir_h fs_h fs bw wall_base wall_int frac ox oy encode
+  local label="$video"
+  [ "$kind" = ir ] && label="$video (IR)"
 
   url="rtsp://localhost:${RTSP_PORT}/${path}"
   publish="rtsp://${RTSP_BIND}:${RTSP_PORT}/${path}"
   logfile="$LOG_DIR/${path}.ffmpeg.log"
-  bn=$(basename -- "$video")
-  file_ss="$START_OFFSET"
-  file_ee="$END_OFFSET"
-  if [ "${#MARKS[@]}" -gt 0 ]; then
-    delta=$(awk -v a="${MARKS[$bn]}" -v b="${MARKS[$REF_NAME]}" 'BEGIN{printf "%.3f", a-b}')
-    file_ss=$(awk -v s="$START_OFFSET" -v d="$delta" 'BEGIN{printf "%.3f", s+d}')
-    if [ -n "$END_OFFSET" ]; then
-      file_ee=$(awk -v e="$END_OFFSET" -v d="$delta" 'BEGIN{printf "%.3f", e+d}')
-    fi
-    file_ss=$(awk -v x="$file_ss" 'BEGIN{printf "%.3f", (x<0)?0:x}')
-    if [ -n "$file_ee" ]; then
-      file_ee=$(awk -v x="$file_ee" 'BEGIN{printf "%.3f", (x<0)?0:x}')
-    fi
-  fi
 
+  local -a ffmpeg_args vf_filters
   ffmpeg_args=(
     ffmpeg -nostdin -hide_banner -loglevel warning
     -fflags +genpts+discardcorrupt
@@ -548,22 +599,48 @@ for video in "${videos[@]}"; do
   ffmpeg_args+=(-map 0:v:0 -an)
 
   vf_filters=()
-  if [ -n "$OUT_HEIGHT" ]; then
+  encode=0
+  ir_h=""
+  if [ "$kind" = ir ]; then
+    ir_h="${OUT_HEIGHT:-720}"
+    vf_filters+=("scale=-2:${ir_h}")
+    case "$IR_STYLE" in
+      night)
+        vf_filters+=(
+          "hue=s=0"
+          "eq=contrast=1.2:brightness=0.04"
+          "colorchannelmixer=rr=0.05:rg=0:rb=0:gr=0.15:gg=0.8:gb=0.05:br=0:bg=0.2:bb=0.05"
+        )
+        ;;
+      *)
+        vf_filters+=(
+          "format=gray"
+          "eq=contrast=1.2:gamma=0.85"
+          "pseudocolor=preset=inferno"
+        )
+        ;;
+    esac
+    encode=1
+  elif [ -n "$OUT_HEIGHT" ]; then
     vf_filters+=("scale=-2:${OUT_HEIGHT}")
+    encode=1
   fi
+
   if [ "$OVERLAY" = 1 ]; then
     if [ ! -f "$OVERLAY_FONT" ]; then
       echo "Timestamp overlay font not found: $OVERLAY_FONT" >&2
-      failed+=("$video")
-      continue
+      failed+=("$label")
+      return
     fi
-    base_unix="$ORIGIN_UNIX"
+    local base_unix="$ORIGIN_UNIX"
     [ -z "$base_unix" ] && base_unix="0"
     # pts 0 of this encode is file_ss; show wall clock origin + file time.
     wall_base=$(awk -v o="$base_unix" -v s="$file_ss" 'BEGIN{printf "%.3f", o+s}')
     fs=22
-    if [ -n "$OUT_HEIGHT" ]; then
-      fs=$((OUT_HEIGHT / 30))
+    fs_h="$OUT_HEIGHT"
+    [ "$kind" = ir ] && [ -z "$fs_h" ] && fs_h="720"
+    if [ -n "$fs_h" ]; then
+      fs=$((fs_h / 30))
       [ "$fs" -lt 16 ] && fs=16
       [ "$fs" -gt 36 ] && fs=36
     fi
@@ -598,13 +675,20 @@ for video in "${videos[@]}"; do
         ;;
     esac
     vf_filters+=("drawtext=fontfile=${OVERLAY_FONT}:fontsize=${fs}:fontcolor=${OVERLAY_COLOR}:borderw=${bw}:bordercolor=black:x=${ox}:y=${oy}:text='%{pts\\:localtime\\:${wall_int}\\:%d-%m-%Y %T}.%{eif\\:mod((t+${frac})*1000\\,1000)\\:d\\:3}'")
+    encode=1
   fi
-  if [ "${#vf_filters[@]}" -gt 0 ]; then
+
+  if [ "$encode" = 1 ]; then
     bitrate="2500k"
-    [ -n "$OUT_HEIGHT" ] && bitrate=$(bitrate_for_height "$OUT_HEIGHT")
+    if [ "$kind" = ir ]; then
+      bitrate=$(bitrate_for_height "$ir_h")
+    elif [ -n "$OUT_HEIGHT" ]; then
+      bitrate=$(bitrate_for_height "$OUT_HEIGHT")
+    fi
+    local vf_joined saved_ifs="$IFS"
     IFS=,
     vf_joined="${vf_filters[*]}"
-    unset IFS
+    IFS="$saved_ifs"
     ffmpeg_args+=(
       -vf "$vf_joined"
       -r 15 -pix_fmt yuv420p
@@ -620,8 +704,8 @@ for video in "${videos[@]}"; do
       hevc|h265) ffmpeg_args+=(-bsf:v hevc_mp4toannexb) ;;
       *)
         echo "Unsupported video codec '${codec:-unknown}' in $(basename -- "$video"); skipping." >&2
-        failed+=("$video")
-        continue
+        failed+=("$label")
+        return
         ;;
     esac
   fi
@@ -643,10 +727,35 @@ for video in "${videos[@]}"; do
   ffmpeg_pid=$!
   echo "ffmpeg $ffmpeg_pid $url $video" >> "$PID_FILE"
   started+=("$ffmpeg_pid|$url|$video|$logfile")
+}
+
+for video in "${videos[@]}"; do
+  path=$(claim_rtsp_path "$(rtsp_path_from_file "$video")")
+  bn=$(basename -- "$video")
+  file_ss="$START_OFFSET"
+  file_ee="$END_OFFSET"
+  if [ "${#MARKS[@]}" -gt 0 ]; then
+    delta=$(awk -v a="${MARKS[$bn]}" -v b="${MARKS[$REF_NAME]}" 'BEGIN{printf "%.3f", a-b}')
+    file_ss=$(awk -v s="$START_OFFSET" -v d="$delta" 'BEGIN{printf "%.3f", s+d}')
+    if [ -n "$END_OFFSET" ]; then
+      file_ee=$(awk -v e="$END_OFFSET" -v d="$delta" 'BEGIN{printf "%.3f", e+d}')
+    fi
+    file_ss=$(awk -v x="$file_ss" 'BEGIN{printf "%.3f", (x<0)?0:x}')
+    if [ -n "$file_ee" ]; then
+      file_ee=$(awk -v x="$file_ee" 'BEGIN{printf "%.3f", (x<0)?0:x}')
+    fi
+  fi
+  publish_feed "$video" "$path" "$file_ss" "$file_ee" color
+  if [ "$IR" = 1 ]; then
+    ir_path=$(claim_rtsp_path "${path}_ir")
+    publish_feed "$video" "$ir_path" "$file_ss" "$file_ee" ir
+  fi
 done
 
 # Transcode needs a bit longer to fail fast than stream copy.
-if [ -n "$OUT_HEIGHT" ] || [ "$OVERLAY" = 1 ]; then
+if [ "$IR" = 1 ]; then
+  sleep 4
+elif [ -n "$OUT_HEIGHT" ] || [ "$OVERLAY" = 1 ]; then
   sleep 3
 else
   sleep 1.5
@@ -699,6 +808,8 @@ printf '%s\n' "$OVERLAY_POS" > "$STATE_DIR/overlay-pos"
 printf '%s\n' "$OVERLAY_SIZE" > "$STATE_DIR/overlay-size"
 printf '%s\n' "$OVERLAY_COLOR" > "$STATE_DIR/overlay-color"
 printf '%s\n' "$ORIGIN_UNIX" > "$STATE_DIR/origin"
+printf '%s\n' "$IR" > "$STATE_DIR/ir"
+printf '%s\n' "$IR_STYLE" > "$STATE_DIR/ir-style"
 : > "$STATE_DIR/marks"
 for mk in "${!MARKS[@]}"; do
   printf '%s %s\n' "$mk" "${MARKS[$mk]}" >> "$STATE_DIR/marks"
@@ -712,6 +823,7 @@ printf '%s\n' "${ok_urls[@]}" > "$STATE_DIR/urls"
 msg="All $ok feeds started"
 [ -n "$OUT_HEIGHT" ] && msg="${msg} at ${OUT_HEIGHT}p"
 [ "$OVERLAY" = 1 ] && msg="${msg}, timestamp overlay"
+[ "$IR" = 1 ] && msg="${msg}, ${IR_STYLE} IR channels"
 if [ -n "$END_OFFSET" ]; then
   if [ "$LOOP_MODE" = 1 ]; then
     msg="${msg}, looping ${START_OFFSET}s–${END_OFFSET}s"

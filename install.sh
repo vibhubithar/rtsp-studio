@@ -223,6 +223,10 @@ check_runtime() {
       *drawtext*) ;;
       *) echo "Warning: ffmpeg is missing the drawtext filter; timestamp overlay will not burn into RTSP." >&2 ;;
     esac
+    case "$filters" in
+      *pseudocolor*) ;;
+      *) echo "Warning: ffmpeg is missing the pseudocolor filter; thermal IR channels will not work." >&2 ;;
+    esac
     case "$encoders" in
       *libx264*) ;;
       *) echo "Warning: ffmpeg is missing libx264; scaled output and overlay need it." >&2 ;;
