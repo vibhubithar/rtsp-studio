@@ -15,9 +15,10 @@
       --danger: #ef7a63;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
       margin: 0;
-      min-height: 100vh;
+      overflow: hidden;
       background:
         radial-gradient(1200px 500px at 10% -10%, #2a331c 0%, transparent 55%),
         var(--bg);
@@ -25,22 +26,86 @@
       font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
     }
     main {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 32px 20px 64px;
+      height: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 10px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .top {
+      flex: 0 0 auto;
     }
     h1 {
-      margin: 0 0 6px;
-      font-size: 28px;
+      margin: 0 0 2px;
+      font-size: 22px;
       letter-spacing: -0.03em;
     }
-    .lede { color: var(--muted); margin: 0 0 28px; }
+    .lede { color: var(--muted); margin: 0; font-size: 13px; }
+    #hostHint { margin: 4px 0 0; }
+    .workspace {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(270px, 320px) minmax(0, 1fr);
+      gap: 10px;
+    }
+    .sidebar, .stage {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .sidebar { overflow: auto; }
+    .feeds {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .grid-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+    .trim-section { flex: 0 0 auto; }
+    .urls-section {
+      flex: 0 0 auto;
+      max-height: 18vh;
+      overflow: auto;
+    }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 14px;
-      padding: 20px;
-      margin-bottom: 16px;
+      padding: 14px;
+      margin: 0;
+    }
+    .sidebar section { padding: 12px; }
+    .sidebar .row { gap: 8px; }
+    .sidebar #folder,
+    .sidebar input[type="datetime-local"] {
+      min-width: 0;
+      width: 100%;
+      flex: 1 1 100%;
+    }
+    .sidebar .overlay-opts {
+      flex-direction: column;
+      align-items: stretch;
+      margin-top: 8px;
+    }
+    .sidebar .overlay-opts select,
+    .sidebar .overlay-opts .grow { flex: 1 1 auto; min-width: 0; width: 100%; }
+    .sidebar .check { margin-top: 8px; }
+    .run-actions { margin-top: 10px; }
+    details.help { margin-top: 10px; color: var(--muted); font-size: 12px; }
+    details.help summary { cursor: pointer; }
+    @media (max-width: 960px) {
+      body { overflow: auto; height: auto; }
+      main { height: auto; }
+      .workspace { grid-template-columns: 1fr; }
+      .feeds { min-height: 55vh; }
     }
     label.field {
       display: block;
@@ -111,8 +176,9 @@
     .feeds-head .field { margin: 0; }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       gap: 12px;
+      align-content: start;
     }
     .tile {
       background: #0b0d08;
@@ -505,13 +571,14 @@
     button.play-clip.sync-on { background: var(--accent); color: #14180c; }
     .check {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       margin-top: 12px;
       cursor: pointer;
       color: var(--ink);
       font-size: 14px;
     }
+    .check input { margin-top: 3px; flex: 0 0 auto; }
     .hint, .status, .error {
       margin: 12px 0 0;
       color: var(--muted);
@@ -535,148 +602,169 @@
 </head>
 <body>
   <main>
-    <h1>RTSP Studio</h1>
-    <p class="lede">Set sync on each camera at the same real-world moment. Use as ref on one camera only for offset math — it does not have to be published. Start and end still apply to every selected feed. Start/Stop from any browser still runs the streams on this host.</p>
-    <p id="hostHint" class="hint" style="margin-top:-18px;margin-bottom:20px"></p>
+    <header class="top">
+      <h1>RTSP Studio</h1>
+      <p class="lede">Set sync on each camera at the same real-world moment. Start/Stop from any browser still runs the streams on this host.</p>
+      <p id="hostHint" class="hint"></p>
+    </header>
 
-    <section>
-      <label class="field" for="folder">Video folder</label>
-      <div class="row">
-        <input id="folder" type="text" spellcheck="false" placeholder="/path/to/videos">
-        <select id="res" aria-label="Output resolution">
-          <option value="">Original</option>
-          <option value="480">480p</option>
-          <option value="720" selected>720p</option>
-          <option value="1080">1080p</option>
-        </select>
-        <button id="browse" class="ghost" type="button">Browse</button>
-        <button id="load" class="ghost" type="button">Load folder</button>
-      </div>
-      <p id="probeStatus" class="hint">Browse folders on this server, or paste a server path, then Load folder.</p>
-    </section>
+    <div class="workspace">
+      <aside class="sidebar">
+        <section>
+          <label class="field" for="folder">Video folder</label>
+          <div class="row">
+            <input id="folder" type="text" spellcheck="false" placeholder="/path/to/videos">
+          </div>
+          <div class="row" style="margin-top:8px">
+            <select id="res" aria-label="Output resolution">
+              <option value="">Original</option>
+              <option value="480">480p</option>
+              <option value="720" selected>720p</option>
+              <option value="1080">1080p</option>
+            </select>
+            <button id="browse" class="ghost" type="button">Browse</button>
+            <button id="load" class="ghost" type="button">Load folder</button>
+          </div>
+          <p id="probeStatus" class="hint">Browse folders on this server, or paste a server path, then Load folder.</p>
+        </section>
 
-    <section>
-      <div class="feeds-head">
-        <label class="field">Feeds</label>
-        <div class="row">
-          <button id="all" class="ghost" type="button">Select all</button>
-          <button id="none" class="ghost" type="button">Select none</button>
-          <button id="clearMarks" class="ghost" type="button">Clear sync marks</button>
-        </div>
-      </div>
-      <div id="grid" class="grid"><p class="empty-grid">Load a folder to show camera frames.</p></div>
-    </section>
+        <section>
+          <label class="field">Publish</label>
+          <div class="row run-actions">
+            <button id="start" type="button" disabled>Start from here</button>
+            <button id="seek" class="ghost" type="button" disabled>Seek all</button>
+            <button id="stop" class="danger" type="button">Stop</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="jitter-label" for="jitterSec">Jitter</label>
+            <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
+            <span class="jitter-label">s</span>
+            <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
+            <button id="clip" class="ghost" type="button" disabled>Create clip</button>
+          </div>
+          <label class="check">
+            <input id="loop" type="checkbox" checked>
+            Loop RTSP between start and end
+          </label>
+          <label class="check">
+            <input id="align" type="checkbox">
+            Align cameras using sync marks
+          </label>
+          <label class="check">
+            <input id="overlay" type="checkbox">
+            Timestamp overlay
+          </label>
+          <div class="row overlay-opts">
+            <div class="grow">
+              <label class="field" for="origin">Wall clock at file 00:00:00</label>
+              <input id="origin" type="datetime-local" step="1">
+            </div>
+            <div>
+              <label class="field" for="overlayPos">Corner</label>
+              <select id="overlayPos" aria-label="Timestamp overlay corner">
+                <option value="top-left" selected>Top left</option>
+                <option value="bottom-left">Bottom left</option>
+                <option value="top-right">Top right</option>
+                <option value="bottom-right">Bottom right</option>
+              </select>
+            </div>
+            <div>
+              <label class="field" for="overlaySize">Size</label>
+              <select id="overlaySize" aria-label="Timestamp overlay size">
+                <option value="small" selected>Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+                <option value="xlarge">Extra large</option>
+              </select>
+            </div>
+            <div>
+              <label class="field" for="overlayColor">Color</label>
+              <select id="overlayColor" aria-label="Timestamp overlay color">
+                <option value="white" selected>White</option>
+                <option value="yellow">Yellow</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+              </select>
+            </div>
+          </div>
+          <label class="check">
+            <input id="ir" type="checkbox">
+            Publish IR channel per camera (_ir RTSP path)
+          </label>
+          <div class="row overlay-opts">
+            <div>
+              <label class="field" for="irStyle">IR look</label>
+              <select id="irStyle" aria-label="IR conversion style">
+                <option value="thermal" selected>Thermal</option>
+                <option value="night">Night vision</option>
+              </select>
+            </div>
+          </div>
+          <p id="runStatus" class="status"></p>
+          <p id="runError" class="error"></p>
+          <details class="help">
+            <summary>How sync, overlay, and IR work</summary>
+            <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end, and it does not need to be selected as a feed. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original). IR publishes a second encoded path named camera_ir (thermal heatmap or green night vision). Original still 4K-copies the color feed and encodes IR at 720p. Create clip writes a synchronized start→end cut of every selected camera into the preset folder, with one subfolder per camera.</p>
+          </details>
+        </section>
+      </aside>
 
-    <section>
-      <label class="field">Trim</label>
-      <div class="trim-stamps">
-        <span id="clockLabel" class="trim-tag selected start" data-mode="start">Start</span>
-        <div id="clockStamp" class="clock-host"></div>
-        <span class="trim-gap">→</span>
-        <span id="clockEndLabel" class="trim-tag" data-mode="end">End</span>
-        <div id="clockEndStamp" class="clock-host"></div>
-      </div>
-      <div class="trim-row">
-        <button id="startPrev" class="ghost frame-btn" type="button" title="Start previous frame" aria-label="Start previous frame">−1</button>
-        <button id="startNext" class="ghost frame-btn" type="button" title="Start next frame" aria-label="Start next frame">+1</button>
-        <div class="trim-bar" aria-label="Start and end trim">
-          <div id="trimFill" class="trim-fill"></div>
-          <input id="slider" class="start" type="range" min="0" max="0" step="any" value="0" disabled aria-label="Start time">
-          <input id="endSlider" class="end" type="range" min="0" max="0" step="any" value="0" disabled aria-label="End time">
-        </div>
-        <button id="endPrev" class="ghost frame-btn" type="button" title="End previous frame" aria-label="End previous frame">−1</button>
-        <button id="endNext" class="ghost frame-btn" type="button" title="End next frame" aria-label="End next frame">+1</button>
-      </div>
-      <div class="marker-legend" id="trimLegend">
-        <button type="button" class="legend start selected" data-mode="start">Start</button>
-        <button type="button" class="legend sync" data-mode="sync">Sync point</button>
-        <button type="button" class="legend end" data-mode="end">End</button>
-      </div>
-      <div class="row preset-row">
-        <input id="presetName" type="text" maxlength="80" placeholder="Preset name" aria-label="Preset name">
-        <button id="presetSave" class="ghost" type="button">Save start/end</button>
-        <select id="presetList" aria-label="Saved start and end presets">
-          <option value="">Load preset…</option>
-        </select>
-        <button id="presetLoad" class="ghost" type="button">Load</button>
-        <button id="presetDelete" class="ghost" type="button">Delete</button>
-        <button id="playClip" class="ghost play-clip" type="button" disabled>Play</button>
-      </div>
-      <label class="check">
-        <input id="loop" type="checkbox" checked>
-        Loop RTSP between start and end
-      </label>
-      <label class="check">
-        <input id="align" type="checkbox">
-        Align cameras using sync marks
-      </label>
-      <label class="check">
-        <input id="overlay" type="checkbox">
-        Timestamp overlay (dd-mm-yyyy hh:mm:ss.sss)
-      </label>
-      <div class="row overlay-opts">
-        <div class="grow">
-          <label class="field" for="origin">Wall clock at file 00:00:00</label>
-          <input id="origin" type="datetime-local" step="1">
-        </div>
-        <div>
-          <label class="field" for="overlayPos">Corner</label>
-          <select id="overlayPos" aria-label="Timestamp overlay corner">
-            <option value="top-left" selected>Top left</option>
-            <option value="bottom-left">Bottom left</option>
-            <option value="top-right">Top right</option>
-            <option value="bottom-right">Bottom right</option>
-          </select>
-        </div>
-        <div>
-          <label class="field" for="overlaySize">Size</label>
-          <select id="overlaySize" aria-label="Timestamp overlay size">
-            <option value="small" selected>Small</option>
-            <option value="medium">Medium</option>
-            <option value="large">Large</option>
-            <option value="xlarge">Extra large</option>
-          </select>
-        </div>
-        <div>
-          <label class="field" for="overlayColor">Color</label>
-          <select id="overlayColor" aria-label="Timestamp overlay color">
-            <option value="white" selected>White</option>
-            <option value="yellow">Yellow</option>
-            <option value="red">Red</option>
-            <option value="green">Green</option>
-            <option value="blue">Blue</option>
-          </select>
-        </div>
-      </div>
-      <label class="check">
-        <input id="ir" type="checkbox">
-        Publish IR channel per camera (_ir RTSP path)
-      </label>
-      <div class="row overlay-opts">
-        <div>
-          <label class="field" for="irStyle">IR look</label>
-          <select id="irStyle" aria-label="IR conversion style">
-            <option value="thermal" selected>Thermal</option>
-            <option value="night">Night vision</option>
-          </select>
-        </div>
-      </div>
-      <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end, and it does not need to be selected as a feed. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original). IR publishes a second encoded path named camera_ir (thermal heatmap or green night vision). Original still 4K-copies the color feed and encodes IR at 720p. Create clip writes a synchronized start→end cut of every selected camera into the preset folder, with one subfolder per camera: no-lights-round1/SITE1-channel-2/SITE1-channel-2.mp4 plus SITE1-channel-2_ir_thermal.mp4 in that same camera folder when IR is on (Original copies color, 720p/1080p/480p scales; IR always encodes).</p>
-      <div class="row" style="margin-top: 14px;">
-        <button id="start" type="button" disabled>Start from here</button>
-        <button id="seek" class="ghost" type="button" disabled>Seek all</button>
-        <button id="stop" class="danger" type="button">Stop</button>
-        <label class="jitter-label" for="jitterSec">Jitter</label>
-        <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
-        <span class="jitter-label">s</span>
-        <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
-        <button id="clip" class="ghost" type="button" disabled>Create clip</button>
-      </div>
-      <p id="runStatus" class="status"></p>
-      <p id="runError" class="error"></p>
-    </section>
+      <div class="stage">
+        <section class="feeds">
+          <div class="feeds-head">
+            <label class="field">Feeds</label>
+            <div class="row">
+              <button id="all" class="ghost" type="button">Select all</button>
+              <button id="none" class="ghost" type="button">Select none</button>
+              <button id="clearMarks" class="ghost" type="button">Clear sync marks</button>
+            </div>
+          </div>
+          <div class="grid-scroll">
+            <div id="grid" class="grid"><p class="empty-grid">Load a folder to show camera frames.</p></div>
+          </div>
+        </section>
 
-    <section>
+        <section class="trim-section">
+          <label class="field">Trim</label>
+          <div class="trim-stamps">
+            <span id="clockLabel" class="trim-tag selected start" data-mode="start">Start</span>
+            <div id="clockStamp" class="clock-host"></div>
+            <span class="trim-gap">→</span>
+            <span id="clockEndLabel" class="trim-tag" data-mode="end">End</span>
+            <div id="clockEndStamp" class="clock-host"></div>
+          </div>
+          <div class="trim-row">
+            <button id="startPrev" class="ghost frame-btn" type="button" title="Start previous frame" aria-label="Start previous frame">−1</button>
+            <button id="startNext" class="ghost frame-btn" type="button" title="Start next frame" aria-label="Start next frame">+1</button>
+            <div class="trim-bar" aria-label="Start and end trim">
+              <div id="trimFill" class="trim-fill"></div>
+              <input id="slider" class="start" type="range" min="0" max="0" step="any" value="0" disabled aria-label="Start time">
+              <input id="endSlider" class="end" type="range" min="0" max="0" step="any" value="0" disabled aria-label="End time">
+            </div>
+            <button id="endPrev" class="ghost frame-btn" type="button" title="End previous frame" aria-label="End previous frame">−1</button>
+            <button id="endNext" class="ghost frame-btn" type="button" title="End next frame" aria-label="End next frame">+1</button>
+          </div>
+          <div class="marker-legend" id="trimLegend">
+            <button type="button" class="legend start selected" data-mode="start">Start</button>
+            <button type="button" class="legend sync" data-mode="sync">Sync point</button>
+            <button type="button" class="legend end" data-mode="end">End</button>
+          </div>
+          <div class="row preset-row">
+            <input id="presetName" type="text" maxlength="80" placeholder="Preset name" aria-label="Preset name">
+            <button id="presetSave" class="ghost" type="button">Save start/end</button>
+            <select id="presetList" aria-label="Saved start and end presets">
+              <option value="">Load preset…</option>
+            </select>
+            <button id="presetLoad" class="ghost" type="button">Load</button>
+            <button id="presetDelete" class="ghost" type="button">Delete</button>
+            <button id="playClip" class="ghost play-clip" type="button" disabled>Play</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <section class="urls-section">
       <label class="field">RTSP URLs</label>
       <ul id="urls"><li>No streams running.</li></ul>
     </section>
@@ -2042,9 +2130,8 @@
       if (data.videos && data.videos.length && (rebuild || !videoMeta.length || videosChanged(data.videos))) {
         if (!originEl.value) originEl.value = defaultOriginValue(data.videos);
         renderGrid(data.videos);
-        const names = data.videos.map((v) => v.name + " (" + fmt(v.duration) + ")").join(", ");
         const n = data.count ?? data.videos.length;
-        probeStatus.textContent = n + " video(s) in folder. Check the ones to publish. " + names;
+        probeStatus.textContent = n + " video(s) in folder. Check the ones to publish.";
       }
       if (data.offset != null && draggingSeek == null) slider.value = String(fromStoredOffset(data.offset));
       applyRange();
