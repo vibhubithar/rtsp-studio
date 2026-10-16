@@ -336,6 +336,49 @@
       background: #000;
       border-radius: 10px;
     }
+    .picker-card {
+      width: min(640px, 100%);
+      max-height: calc(100vh - 48px);
+    }
+    .picker-path {
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+      word-break: break-all;
+      margin: 0 0 10px;
+    }
+    .picker-list {
+      max-height: min(50vh, 420px);
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0b0d08;
+      margin-top: 10px;
+    }
+    .picker-list button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: var(--ink);
+      border-radius: 0;
+      font-weight: 500;
+      border-bottom: 1px solid var(--line);
+    }
+    .picker-list button:hover,
+    .picker-list button:focus {
+      background: #1a1f14;
+    }
+    .picker-list .picker-file {
+      cursor: default;
+      font-weight: 400;
+      color: var(--muted);
+    }
+    .picker-list .picker-file:hover,
+    .picker-list .picker-file:focus {
+      background: transparent;
+    }
+    .picker-empty { margin: 0; padding: 16px; color: var(--muted); }
+    .picker-actions { margin-top: 12px; justify-content: flex-end; }
     .lightbox-controls { margin-top: 12px; }
     .lightbox-controls .sync-seek { padding: 0; }
     .lightbox-tools { margin-top: 10px; }
@@ -506,9 +549,10 @@
           <option value="720" selected>720p</option>
           <option value="1080">1080p</option>
         </select>
+        <button id="browse" class="ghost" type="button">Browse</button>
         <button id="load" class="ghost" type="button">Load folder</button>
       </div>
-      <p id="probeStatus" class="hint">Load a folder, then check the cameras you want as RTSP feeds.</p>
+      <p id="probeStatus" class="hint">Browse folders on this server, or paste a server path, then Load folder.</p>
     </section>
 
     <section>
@@ -637,6 +681,25 @@
       <ul id="urls"><li>No streams running.</li></ul>
     </section>
   </main>
+  <div id="folderPicker" class="lightbox" hidden>
+    <div class="lightbox-backdrop" id="pickerBackdrop"></div>
+    <div class="lightbox-card picker-card" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+      <div class="lightbox-head">
+        <strong id="pickerTitle">Server folder</strong>
+        <button id="pickerClose" class="ghost" type="button">Close</button>
+      </div>
+      <p id="pickerPath" class="picker-path"></p>
+      <div class="row">
+        <button id="pickerUp" class="ghost" type="button">Up</button>
+        <span id="pickerStatus" class="hint"></span>
+      </div>
+      <div id="pickerList" class="picker-list"></div>
+      <div class="row picker-actions">
+        <button id="pickerCancel" class="ghost" type="button">Cancel</button>
+        <button id="pickerUse" type="button">Use this folder</button>
+      </div>
+    </div>
+  </div>
   <div id="lightbox" class="lightbox" hidden>
     <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
     <div class="lightbox-card" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
@@ -1515,6 +1578,8 @@
         const el = $(id);
         if (el) el.disabled = locked;
       });
+      $("browse").disabled = busy;
+      $("pickerUse").disabled = locked;
       slider.disabled = locked || noRange;
       endSlider.disabled = locked || noRange;
       $("lightboxSeek").disabled = locked;
@@ -1997,11 +2062,75 @@
       await applySharedState(data, { rebuild: true, refreshFrames: true });
     }
 
+    function pickerOpen() {
+      return !$("folderPicker").hidden;
+    }
+
+    function closeFolderPicker() {
+      $("folderPicker").hidden = true;
+    }
+
+    function pickerRow(label, className, onClick) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      if (className) btn.className = className;
+      if (onClick) btn.addEventListener("click", onClick);
+      return btn;
+    }
+
+    async function refreshFolderPicker(path) {
+      $("pickerStatus").textContent = "Listing server…";
+      $("pickerList").innerHTML = "";
+      try {
+        const q = path ? "?path=" + encodeURIComponent(path) : "";
+        const data = await api("/api/browse" + q);
+        $("pickerPath").textContent = data.path;
+        $("pickerUp").disabled = !data.parent;
+        $("pickerUp").dataset.path = data.parent || "";
+        $("pickerUse").dataset.path = data.path;
+        const list = $("pickerList");
+        const dirs = data.dirs || [];
+        const files = data.files || [];
+        if (!dirs.length && !files.length) {
+          const empty = document.createElement("p");
+          empty.className = "picker-empty";
+          empty.textContent = "Empty folder.";
+          list.append(empty);
+        } else {
+          dirs.forEach((dir) => {
+            list.append(pickerRow(dir.name + "/", "", () => { refreshFolderPicker(dir.path); }));
+          });
+          files.forEach((file) => {
+            list.append(pickerRow(file.name, "picker-file"));
+          });
+        }
+        $("pickerStatus").textContent = files.length
+          ? files.length + " video file(s) on this server folder"
+          : "No video files in this server folder";
+      } catch (err) {
+        $("pickerStatus").textContent = err.message;
+      }
+    }
+
+    async function openFolderPicker() {
+      $("folderPicker").hidden = false;
+      await refreshFolderPicker(folderEl.value.trim());
+    }
+
+    async function usePickedFolder() {
+      const path = $("pickerUse").dataset.path;
+      if (!path) return;
+      folderEl.value = path;
+      closeFolderPicker();
+      await loadFolder();
+    }
+
     async function loadFolder() {
       const folder = folderEl.value.trim();
       runError.textContent = "";
       if (!folder) {
-        probeStatus.textContent = "Enter a folder path.";
+        await openFolderPicker();
         return;
       }
       stopPlayback();
@@ -2387,6 +2516,15 @@
       refreshPreviews();
     });
     $("load").addEventListener("click", loadFolder);
+    $("browse").addEventListener("click", openFolderPicker);
+    $("pickerUp").addEventListener("click", () => {
+      const parent = $("pickerUp").dataset.path;
+      if (parent) refreshFolderPicker(parent);
+    });
+    $("pickerUse").addEventListener("click", usePickedFolder);
+    $("pickerClose").addEventListener("click", closeFolderPicker);
+    $("pickerCancel").addEventListener("click", closeFolderPicker);
+    $("pickerBackdrop").addEventListener("click", closeFolderPicker);
     $("start").addEventListener("click", () => startAtSlider("start"));
     $("seek").addEventListener("click", () => startAtSlider("seek"));
     $("stop").addEventListener("click", stopStreams);
@@ -2441,7 +2579,13 @@
     $("lightboxClose").addEventListener("click", closeLightbox);
     $("lightboxBackdrop").addEventListener("click", closeLightbox);
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && lightboxName) {
+      if (e.key !== "Escape") return;
+      if (pickerOpen()) {
+        e.preventDefault();
+        closeFolderPicker();
+        return;
+      }
+      if (lightboxName) {
         e.preventDefault();
         closeLightbox();
       }

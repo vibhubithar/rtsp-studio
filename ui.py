@@ -311,6 +311,49 @@ def resolve_folder(folder: str) -> Path:
     return path
 
 
+def browse_folder(folder: str) -> dict:
+    raw = (folder or "").strip()
+    home = Path.home()
+    if not raw:
+        path = home if home.is_dir() else Path("/")
+    else:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = home / path
+        try:
+            path = path.resolve()
+        except OSError as exc:
+            raise ValueError(f"Cannot resolve {raw}: {exc}") from exc
+        if path.is_file():
+            path = path.parent
+        if not path.is_dir():
+            raise ValueError(f"Not a directory: {path}")
+    try:
+        entries = list(path.iterdir())
+    except OSError as exc:
+        raise ValueError(f"Cannot read {path}: {exc}") from exc
+    dirs = []
+    files = []
+    for item in sorted(entries, key=lambda p: p.name.lower()):
+        if item.name.startswith("."):
+            continue
+        try:
+            if item.is_dir():
+                dirs.append({"name": item.name, "path": str(item)})
+            elif item.is_file() and item.suffix.lower() in VIDEO_EXTS:
+                files.append({"name": item.name, "path": str(item)})
+        except OSError:
+            continue
+    parent = str(path.parent) if path.parent != path else ""
+    return {
+        "path": str(path),
+        "parent": parent,
+        "dirs": dirs,
+        "files": files,
+        "videos": len(files),
+    }
+
+
 def parse_sync_text(text: str) -> dict:
     marks: dict[str, float] = {}
     ref = None
@@ -1239,6 +1282,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/clip-progress":
             self._send(200, clip_progress())
+            return
+        if parsed.path == "/api/browse":
+            folder = (parse_qs(parsed.query).get("path") or [""])[0]
+            try:
+                self._send(200, browse_folder(folder))
+            except Exception as exc:
+                self._send(400, {"error": str(exc)})
             return
         if parsed.path == "/api/probe":
             folder = (parse_qs(parsed.query).get("folder") or [""])[0]
