@@ -6,10 +6,11 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 MEDIAMTX_VERSION="${MEDIAMTX_VERSION:-1.13.1}"
 VENDOR_DIR="$SCRIPT_DIR/vendor/mediamtx"
 SKIP_PACKAGES=0
+START_UI=1
 
 usage() {
   cat <<EOF
-Usage: $0 [--skip-packages]
+Usage: $0 [--skip-packages] [--no-start]
 
 Installs what this app needs on a machine that does not already have
 MediaMTX, ffmpeg, or the timestamp font:
@@ -19,14 +20,16 @@ MediaMTX, ffmpeg, or the timestamp font:
   - a monospace TTF (DejaVu Sans Mono)
   - MediaMTX v${MEDIAMTX_VERSION} into ./vendor/mediamtx
 
-Then start the UI:
+Then starts the web UI as a background service (no terminal logs):
 
-  python3 $SCRIPT_DIR/ui.py
+  $SCRIPT_DIR/start-ui.sh
+  $SCRIPT_DIR/stop-ui.sh
 
 Open the printed URL (this host, port 8787). Start/Stop in the web UI
 runs the RTSP publishers on this machine.
 
   --skip-packages   only fetch MediaMTX; do not install OS packages
+  --no-start        install only; do not start the UI service
   MEDIAMTX_VERSION  override MediaMTX release (default: ${MEDIAMTX_VERSION})
 EOF
 }
@@ -39,6 +42,10 @@ while [ $# -gt 0 ]; do
       ;;
     --skip-packages)
       SKIP_PACKAGES=1
+      shift
+      ;;
+    --no-start)
+      START_UI=0
       shift
       ;;
     *)
@@ -246,7 +253,7 @@ check_runtime() {
   else
     echo "MediaMTX: $VENDOR_DIR/mediamtx"
   fi
-  chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/stop.sh" "$SCRIPT_DIR/ui.py" "$SCRIPT_DIR/install.sh" 2>/dev/null || true
+  chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/stop.sh" "$SCRIPT_DIR/start-ui.sh" "$SCRIPT_DIR/stop-ui.sh" "$SCRIPT_DIR/ui.py" "$SCRIPT_DIR/install.sh" 2>/dev/null || true
   return "$failed"
 }
 
@@ -257,12 +264,25 @@ if ! check_runtime; then
   exit 1
 fi
 
-cat <<EOF
+if [ "$START_UI" = 1 ]; then
+  echo
+  echo "Starting the web UI as a background service…"
+  # shellcheck source=common.sh
+  . "$SCRIPT_DIR/common.sh"
+  start_ui_service
+  print_ui_urls
+  echo "Start/Stop in the web UI still publishes RTSP from this host."
+  echo "Stop later with: $SCRIPT_DIR/stop-ui.sh"
+else
+  cat <<EOF
 
 Ready. Start the UI on this machine:
 
-  python3 $SCRIPT_DIR/ui.py
+  $SCRIPT_DIR/start-ui.sh
 
 The web UI listens on port 8787 (all interfaces). Start/Stop from any
-browser still publishes RTSP from this host.
+browser still publishes RTSP from this host. Stop with:
+
+  $SCRIPT_DIR/stop-ui.sh
 EOF
+fi

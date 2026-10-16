@@ -13,10 +13,9 @@ Default RTSP: `rtsp://<host>:8554/<camera-stem>` over **TCP**
 
 ```bash
 ./install.sh
-python3 ui.py
 ```
 
-Open the printed URL, load a video folder, check the cameras to publish, set sync + trim, then **Start from here**.
+`install.sh` starts the web UI as a background service. Open the printed URL, load a video folder, check the cameras to publish, set sync + trim, then **Start from here**. Use `./start-ui.sh` / `./stop-ui.sh` later.
 
 `install.sh` puts MediaMTX v1.13.1 in `vendor/mediamtx` and checks for Python 3.10+, ffmpeg/ffprobe (libx264 + drawtext), and a monospace TTF for overlays.
 

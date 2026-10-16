@@ -45,7 +45,7 @@ Full feature list: [FEATURES.md](FEATURES.md) · Responsible use: [DISCLAIMER.md
 ```bash
 git clone https://github.com/<you>/rtsp-studio.git
 cd rtsp-studio
-chmod +x install.sh start.sh stop.sh ui.py
+chmod +x install.sh start-ui.sh stop-ui.sh start.sh stop.sh ui.py
 ./install.sh
 ```
 
@@ -54,11 +54,13 @@ chmod +x install.sh start.sh stop.sh ui.py
 1. Install `python3`, `ffmpeg`, overlay fonts, `curl`, and related tools via `apt`, `dnf`, `yum`, `pacman`, or `brew` (needs sudo/root unless everything is already present).
 2. Download MediaMTX **v1.13.1** into `./vendor/mediamtx` (or copy it from `~/Downloads/mediamtx_v1.13.1_<os>_<arch>/` if you already have the release).
 3. Check that `python3`, `ffmpeg`/`ffprobe`, and the MediaMTX binary are usable.
+4. Start the web UI as a background service (systemd user unit when available, otherwise a detached process). Logs go to `.rtsp-state/logs/ui.log`, not the terminal.
 
 ### Options
 
 ```bash
 ./install.sh --skip-packages          # only fetch MediaMTX; you already have python/ffmpeg/fonts
+./install.sh --no-start               # install only; do not start the UI service
 MEDIAMTX_VERSION=1.13.1 ./install.sh  # override the MediaMTX release tag
 ```
 
@@ -76,22 +78,25 @@ sudo apt-get install -y python3 ffmpeg fonts-dejavu-core curl ca-certificates ip
 
 ## Run
 
-On the **machine that should publish RTSP**:
+On the **machine that should publish RTSP**, `./install.sh` starts the UI for you. To start or stop it later:
 
 ```bash
-python3 ui.py
+./start-ui.sh
+./stop-ui.sh
 ```
 
-The process prints both localhost and LAN URLs, for example:
+`start-ui.sh` prints both localhost and LAN URLs, for example:
 
 ```
 RTSP Studio: http://127.0.0.1:8787
-         http://192.168.1.44:8787
+             http://192.168.1.44:8787
 ```
 
 Open that URL from this machine or another on the LAN. Load a video folder, select cameras, set sync and trim, then **Start from here**.
 
-Stop the UI with Ctrl+C. Use **Stop** in the web UI (or `./stop.sh`) to tear down ffmpeg and MediaMTX.
+`stop-ui.sh` stops the web UI and tears down ffmpeg/MediaMTX. Use **Stop** in the web UI (or `./stop.sh`) to stop publishers only. `./stop-ui.sh --ui-only` stops the web UI and leaves RTSP running.
+
+Logs: `journalctl --user -u rtsp-studio -n 50` or `.rtsp-state/logs/ui.log`.
 
 ### Environment
 
@@ -104,7 +109,7 @@ Stop the UI with Ctrl+C. Use **Stop** in the web UI (or `./stop.sh`) to tear dow
 | `MEDIAMTX_BIN` | `vendor/mediamtx/mediamtx` | MediaMTX binary |
 
 ```bash
-UI_PORT=9087 python3 ui.py
+UI_PORT=9087 ./start-ui.sh
 ```
 
 ---
@@ -161,7 +166,8 @@ vlc --rtsp-tcp rtsp://192.168.1.44:8554/SITE1-channel-2
 
 ```
 rtsp-studio/
-  install.sh          # OS packages + MediaMTX
+  install.sh          # OS packages + MediaMTX + start UI service
+  start-ui.sh / stop-ui.sh  # web UI service
   ui.py               # web UI (port 8787)
   ui/index.html
   start.sh / stop.sh  # MediaMTX + ffmpeg publishers
