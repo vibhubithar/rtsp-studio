@@ -34,22 +34,19 @@
       flex-direction: column;
       gap: 10px;
     }
-    .top {
-      flex: 0 0 auto;
-    }
     h1 {
-      margin: 0 0 2px;
-      font-size: 22px;
+      margin: 0;
+      font-size: 16px;
       letter-spacing: -0.03em;
+      text-transform: none;
     }
-    .lede { color: var(--muted); margin: 0; font-size: 13px; }
+    .lede { color: var(--muted); margin: 8px 0 0; font-size: 13px; }
     #hostHint { margin: 4px 0 0; }
     .workspace {
       flex: 1;
       min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(270px, 320px) minmax(0, 1fr);
-      gap: 10px;
+      display: flex;
+      gap: 0;
     }
     .sidebar, .stage {
       min-height: 0;
@@ -57,7 +54,31 @@
       flex-direction: column;
       gap: 10px;
     }
-    .sidebar { overflow: auto; }
+    .sidebar {
+      width: 320px;
+      min-width: 220px;
+      max-width: 70vw;
+      flex: 0 0 auto;
+      overflow: auto;
+    }
+    .sidebar-resizer {
+      flex: 0 0 8px;
+      cursor: col-resize;
+      align-self: stretch;
+      border-radius: 99px;
+      background: var(--line);
+      opacity: 0.55;
+    }
+    .sidebar-resizer:hover,
+    .sidebar-resizer.dragging {
+      background: var(--accent);
+      opacity: 0.45;
+    }
+    .stage {
+      flex: 1;
+      min-width: 0;
+      padding-left: 8px;
+    }
     .feeds {
       flex: 1;
       min-height: 0;
@@ -70,11 +91,42 @@
       overflow: auto;
     }
     .trim-section { flex: 0 0 auto; }
-    .urls-section {
-      flex: 0 0 auto;
-      max-height: 18vh;
-      overflow: auto;
+    .fold {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0;
+      margin: 0;
     }
+    .fold > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 10px 12px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      user-select: none;
+    }
+    .fold > summary::-webkit-details-marker { display: none; }
+    .fold > summary::before {
+      content: "▸ ";
+      color: var(--accent);
+    }
+    .fold[open] > summary::before { content: "▾ "; }
+    .fold-body { padding: 0 12px 12px; }
+    .fold-body .run-actions { margin-top: 0; }
+    .fold-urls ul { margin: 0; }
+    .fold-urls li {
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .fold-urls .url { font-size: 12px; }
+    .stage .fold { flex: 0 0 auto; }
+    .stage .fold .preset-row { margin-top: 0; }
+    body.sidebar-resizing { cursor: col-resize; user-select: none; }
+    body.sidebar-resizing * { cursor: col-resize !important; }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -82,7 +134,6 @@
       padding: 14px;
       margin: 0;
     }
-    .sidebar section { padding: 12px; }
     .sidebar .row { gap: 8px; }
     .sidebar #folder,
     .sidebar input[type="datetime-local"] {
@@ -104,7 +155,10 @@
     @media (max-width: 960px) {
       body { overflow: auto; height: auto; }
       main { height: auto; }
-      .workspace { grid-template-columns: 1fr; }
+      .workspace { flex-direction: column; }
+      .sidebar { width: 100% !important; max-width: none; }
+      .sidebar-resizer { display: none; }
+      .stage { padding-left: 0; }
       .feeds { min-height: 55vh; }
     }
     label.field {
@@ -602,113 +656,128 @@
 </head>
 <body>
   <main>
-    <header class="top">
-      <h1>RTSP Studio</h1>
-      <p class="lede">Set sync on each camera at the same real-world moment. Start/Stop from any browser still runs the streams on this host.</p>
-      <p id="hostHint" class="hint"></p>
-    </header>
-
     <div class="workspace">
-      <aside class="sidebar">
-        <section>
-          <label class="field" for="folder">Video folder</label>
-          <div class="row">
-            <input id="folder" type="text" spellcheck="false" placeholder="/path/to/videos">
+      <aside class="sidebar" id="sidebar">
+        <details class="fold" data-fold="about">
+          <summary>RTSP Studio</summary>
+          <div class="fold-body">
+            <h1>RTSP Studio</h1>
+            <p class="lede">Set sync on each camera at the same real-world moment. Start/Stop from any browser still runs the streams on this host.</p>
+            <p id="hostHint" class="hint"></p>
           </div>
-          <div class="row" style="margin-top:8px">
-            <select id="res" aria-label="Output resolution">
-              <option value="">Original</option>
-              <option value="480">480p</option>
-              <option value="720" selected>720p</option>
-              <option value="1080">1080p</option>
-            </select>
-            <button id="browse" class="ghost" type="button">Browse</button>
-            <button id="load" class="ghost" type="button">Load folder</button>
-          </div>
-          <p id="probeStatus" class="hint">Browse folders on this server, or paste a server path, then Load folder.</p>
-        </section>
+        </details>
 
-        <section>
-          <label class="field">Publish</label>
-          <div class="row run-actions">
-            <button id="start" type="button" disabled>Start from here</button>
-            <button id="seek" class="ghost" type="button" disabled>Seek all</button>
-            <button id="stop" class="danger" type="button">Stop</button>
-          </div>
-          <div class="row" style="margin-top:8px">
-            <label class="jitter-label" for="jitterSec">Jitter</label>
-            <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
-            <span class="jitter-label">s</span>
-            <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
-            <button id="clip" class="ghost" type="button" disabled>Create clip</button>
-          </div>
-          <label class="check">
-            <input id="loop" type="checkbox" checked>
-            Loop RTSP between start and end
-          </label>
-          <label class="check">
-            <input id="align" type="checkbox">
-            Align cameras using sync marks
-          </label>
-          <label class="check">
-            <input id="overlay" type="checkbox">
-            Timestamp overlay
-          </label>
-          <div class="row overlay-opts">
-            <div class="grow">
-              <label class="field" for="origin">Wall clock at file 00:00:00</label>
-              <input id="origin" type="datetime-local" step="1">
+        <details class="fold" data-fold="folder" open>
+          <summary>Video folder</summary>
+          <div class="fold-body">
+            <div class="row">
+              <input id="folder" type="text" spellcheck="false" placeholder="/path/to/videos" aria-label="Video folder">
             </div>
-            <div>
-              <label class="field" for="overlayPos">Corner</label>
-              <select id="overlayPos" aria-label="Timestamp overlay corner">
-                <option value="top-left" selected>Top left</option>
-                <option value="bottom-left">Bottom left</option>
-                <option value="top-right">Top right</option>
-                <option value="bottom-right">Bottom right</option>
+            <div class="row" style="margin-top:8px">
+              <select id="res" aria-label="Output resolution">
+                <option value="">Original</option>
+                <option value="480">480p</option>
+                <option value="720" selected>720p</option>
+                <option value="1080">1080p</option>
               </select>
+              <button id="browse" class="ghost" type="button">Browse</button>
+              <button id="load" class="ghost" type="button">Load folder</button>
             </div>
-            <div>
-              <label class="field" for="overlaySize">Size</label>
-              <select id="overlaySize" aria-label="Timestamp overlay size">
-                <option value="small" selected>Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-                <option value="xlarge">Extra large</option>
-              </select>
-            </div>
-            <div>
-              <label class="field" for="overlayColor">Color</label>
-              <select id="overlayColor" aria-label="Timestamp overlay color">
-                <option value="white" selected>White</option>
-                <option value="yellow">Yellow</option>
-                <option value="red">Red</option>
-                <option value="green">Green</option>
-                <option value="blue">Blue</option>
-              </select>
-            </div>
+            <p id="probeStatus" class="hint">Browse folders on this server, or paste a server path, then Load folder.</p>
           </div>
-          <label class="check">
-            <input id="ir" type="checkbox">
-            Publish IR channel per camera (_ir RTSP path)
-          </label>
-          <div class="row overlay-opts">
-            <div>
-              <label class="field" for="irStyle">IR look</label>
-              <select id="irStyle" aria-label="IR conversion style">
-                <option value="thermal" selected>Thermal</option>
-                <option value="night">Night vision</option>
-              </select>
+        </details>
+
+        <details class="fold" data-fold="publish" open>
+          <summary>Publish</summary>
+          <div class="fold-body">
+            <div class="row run-actions">
+              <button id="start" type="button" disabled>Start from here</button>
+              <button id="seek" class="ghost" type="button" disabled>Seek all</button>
+              <button id="stop" class="danger" type="button">Stop</button>
             </div>
+            <div class="row" style="margin-top:8px">
+              <label class="jitter-label" for="jitterSec">Jitter</label>
+              <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
+              <span class="jitter-label">s</span>
+              <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
+              <button id="clip" class="ghost" type="button" disabled>Create clip</button>
+            </div>
+            <label class="check">
+              <input id="loop" type="checkbox" checked>
+              Loop RTSP between start and end
+            </label>
+            <label class="check">
+              <input id="align" type="checkbox">
+              Align cameras using sync marks
+            </label>
+            <label class="check">
+              <input id="overlay" type="checkbox">
+              Timestamp overlay
+            </label>
+            <div class="row overlay-opts">
+              <div class="grow">
+                <label class="field" for="origin">Wall clock at file 00:00:00</label>
+                <input id="origin" type="datetime-local" step="1">
+              </div>
+              <div>
+                <label class="field" for="overlayPos">Corner</label>
+                <select id="overlayPos" aria-label="Timestamp overlay corner">
+                  <option value="top-left" selected>Top left</option>
+                  <option value="bottom-left">Bottom left</option>
+                  <option value="top-right">Top right</option>
+                  <option value="bottom-right">Bottom right</option>
+                </select>
+              </div>
+              <div>
+                <label class="field" for="overlaySize">Size</label>
+                <select id="overlaySize" aria-label="Timestamp overlay size">
+                  <option value="small" selected>Small</option>
+                  <option value="medium">Medium</option>
+                  <option value="large">Large</option>
+                  <option value="xlarge">Extra large</option>
+                </select>
+              </div>
+              <div>
+                <label class="field" for="overlayColor">Color</label>
+                <select id="overlayColor" aria-label="Timestamp overlay color">
+                  <option value="white" selected>White</option>
+                  <option value="yellow">Yellow</option>
+                  <option value="red">Red</option>
+                  <option value="green">Green</option>
+                  <option value="blue">Blue</option>
+                </select>
+              </div>
+            </div>
+            <label class="check">
+              <input id="ir" type="checkbox">
+              Publish IR channel per camera (_ir RTSP path)
+            </label>
+            <div class="row overlay-opts">
+              <div>
+                <label class="field" for="irStyle">IR look</label>
+                <select id="irStyle" aria-label="IR conversion style">
+                  <option value="thermal" selected>Thermal</option>
+                  <option value="night">Night vision</option>
+                </select>
+              </div>
+            </div>
+            <p id="runStatus" class="status"></p>
+            <p id="runError" class="error"></p>
+            <details class="help">
+              <summary>How sync, overlay, and IR work</summary>
+              <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end, and it does not need to be selected as a feed. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original). IR publishes a second encoded path named camera_ir (thermal heatmap or green night vision). Original still 4K-copies the color feed and encodes IR at 720p. Create clip writes a synchronized start→end cut of every selected camera into the preset folder, with one subfolder per camera.</p>
+            </details>
           </div>
-          <p id="runStatus" class="status"></p>
-          <p id="runError" class="error"></p>
-          <details class="help">
-            <summary>How sync, overlay, and IR work</summary>
-            <p class="hint">Scrub or type HH:MM:SS.mmm, then Set sync on each camera. Use as ref on one camera so offsets can be calculated; it does not pick start or end, and it does not need to be selected as a feed. Turn align on, then set the shared start and end. Overlay is shown on previews immediately and burned into RTSP on Start (forces encode even at Original). IR publishes a second encoded path named camera_ir (thermal heatmap or green night vision). Original still 4K-copies the color feed and encodes IR at 720p. Create clip writes a synchronized start→end cut of every selected camera into the preset folder, with one subfolder per camera.</p>
-          </details>
-        </section>
+        </details>
+
+        <details class="fold fold-urls" data-fold="urls" open>
+          <summary>RTSP URLs</summary>
+          <div class="fold-body">
+            <ul id="urls"><li>No streams running.</li></ul>
+          </div>
+        </details>
       </aside>
+      <div class="sidebar-resizer" id="sidebarResizer" role="separator" aria-orientation="vertical" aria-label="Resize left nav" title="Drag to widen the left nav"></div>
 
       <div class="stage">
         <section class="feeds">
@@ -750,24 +819,24 @@
             <button type="button" class="legend sync" data-mode="sync">Sync point</button>
             <button type="button" class="legend end" data-mode="end">End</button>
           </div>
-          <div class="row preset-row">
-            <input id="presetName" type="text" maxlength="80" placeholder="Preset name" aria-label="Preset name">
-            <button id="presetSave" class="ghost" type="button">Save start/end</button>
-            <select id="presetList" aria-label="Saved start and end presets">
-              <option value="">Load preset…</option>
-            </select>
-            <button id="presetLoad" class="ghost" type="button">Load</button>
-            <button id="presetDelete" class="ghost" type="button">Delete</button>
-            <button id="playClip" class="ghost play-clip" type="button" disabled>Play</button>
-          </div>
         </section>
+        <details class="fold" data-fold="presets" open>
+          <summary>Presets</summary>
+          <div class="fold-body">
+            <div class="row preset-row">
+              <input id="presetName" type="text" maxlength="80" placeholder="Preset name" aria-label="Preset name">
+              <button id="presetSave" class="ghost" type="button">Save start/end</button>
+              <select id="presetList" aria-label="Saved start and end presets">
+                <option value="">Load preset…</option>
+              </select>
+              <button id="presetLoad" class="ghost" type="button">Load</button>
+              <button id="presetDelete" class="ghost" type="button">Delete</button>
+              <button id="playClip" class="ghost play-clip" type="button" disabled>Play</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
-
-    <section class="urls-section">
-      <label class="field">RTSP URLs</label>
-      <ul id="urls"><li>No streams running.</li></ul>
-    </section>
   </main>
   <div id="folderPicker" class="lightbox" hidden>
     <div class="lightbox-backdrop" id="pickerBackdrop"></div>
@@ -894,6 +963,69 @@
 
     const savedFolder = localStorage.getItem("rtspFolder");
     if (savedFolder) folderEl.value = savedFolder;
+
+    const SIDEBAR_MIN = 220;
+    const FOLD_STORE = "rtspFolds";
+    const SIDEBAR_W_STORE = "rtspSidebarW";
+
+    function sidebarMax() {
+      return Math.max(SIDEBAR_MIN, Math.floor(window.innerWidth * 0.7));
+    }
+
+    function applySidebarWidth(px) {
+      const sidebar = $("sidebar");
+      const w = Math.min(sidebarMax(), Math.max(SIDEBAR_MIN, Math.round(Number(px) || 320)));
+      sidebar.style.width = w + "px";
+      return w;
+    }
+
+    function saveFolds() {
+      const saved = {};
+      document.querySelectorAll("details.fold[data-fold]").forEach((el) => {
+        saved[el.dataset.fold] = el.open;
+      });
+      localStorage.setItem(FOLD_STORE, JSON.stringify(saved));
+    }
+
+    function restoreFolds() {
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(FOLD_STORE) || "{}") || {}; } catch (_) { saved = {}; }
+      document.querySelectorAll("details.fold[data-fold]").forEach((el) => {
+        const key = el.dataset.fold;
+        if (Object.prototype.hasOwnProperty.call(saved, key)) el.open = !!saved[key];
+        el.addEventListener("toggle", saveFolds);
+      });
+    }
+
+    (function initSidebarLayout() {
+      const savedW = Number(localStorage.getItem(SIDEBAR_W_STORE));
+      if (Number.isFinite(savedW) && savedW > 0) applySidebarWidth(savedW);
+      restoreFolds();
+      const resizer = $("sidebarResizer");
+      const sidebar = $("sidebar");
+      let drag = false;
+      resizer.addEventListener("pointerdown", (e) => {
+        if (window.matchMedia("(max-width: 960px)").matches) return;
+        e.preventDefault();
+        drag = true;
+        document.body.classList.add("sidebar-resizing");
+        resizer.classList.add("dragging");
+        resizer.setPointerCapture(e.pointerId);
+      });
+      resizer.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const w = applySidebarWidth(e.clientX - sidebar.getBoundingClientRect().left);
+        localStorage.setItem(SIDEBAR_W_STORE, String(w));
+      });
+      function endDrag() {
+        if (!drag) return;
+        drag = false;
+        document.body.classList.remove("sidebar-resizing");
+        resizer.classList.remove("dragging");
+      }
+      resizer.addEventListener("pointerup", endDrag);
+      resizer.addEventListener("pointercancel", endDrag);
+    })();
 
     function fmt(seconds) {
       const p = partsFromSeconds(seconds);
