@@ -24,7 +24,7 @@ Load the folder in the web UI, mark the same real-world moment on each camera, t
 | RTSP | `rtsp://<host>:8554/<camera-stem>` over **TCP** |
 | Control | Start/Stop from any browser; publishers always run on the host |
 
-Full feature list: [FEATURES.md](FEATURES.md) · Responsible use: [DISCLAIMER.md](DISCLAIMER.md)
+Full feature list: [FEATURES.md](FEATURES.md) · Responsible use: [DISCLAIMER.md](DISCLAIMER.md) · Source: [github.com/vibhubithar/rtsp-studio](https://github.com/vibhubithar/rtsp-studio)
 
 ---
 
@@ -43,7 +43,7 @@ Full feature list: [FEATURES.md](FEATURES.md) · Responsible use: [DISCLAIMER.md
 ## Install
 
 ```bash
-git clone https://github.com/<you>/rtsp-studio.git
+git clone https://github.com/vibhubithar/rtsp-studio.git
 cd rtsp-studio
 chmod +x install.sh start-ui.sh stop-ui.sh start.sh stop.sh ui.py
 ./install.sh
@@ -89,14 +89,26 @@ On the **machine that should publish RTSP**, `./install.sh` starts the UI for yo
 
 ```
 RTSP Studio: http://127.0.0.1:8787
-             http://192.168.1.44:8787
+             http://<host>:8787
 ```
 
-Open that URL from this machine or another on the LAN. Load a video folder, select cameras, set sync and trim, then **Start from here**.
+Open that URL from this machine or another on the LAN. **Browse** lists folders on the **host** (not the browser). Load a video folder, select cameras, set sync and trim, then **Start from here**.
+
+The left nav (folder, publish, RTSP URLs, about) and presets are foldable. The video grid and trim line stay open. Drag the bar next to the left nav to widen it.
 
 `stop-ui.sh` stops the web UI and tears down ffmpeg/MediaMTX. Use **Stop** in the web UI (or `./stop.sh`) to stop publishers only. `./stop-ui.sh --ui-only` stops the web UI and leaves RTSP running.
 
 Logs: `journalctl --user -u rtsp-studio -n 50` or `.rtsp-state/logs/ui.log`.
+
+### Update an existing clone
+
+```bash
+git pull
+./stop-ui.sh --ui-only
+./start-ui.sh
+```
+
+Then hard-refresh the browser. That restarts the UI only; it does not stop RTSP unless you omit `--ui-only`.
 
 ### Environment
 
@@ -116,10 +128,10 @@ UI_PORT=9087 ./start-ui.sh
 
 ## First session
 
-1. **Load folder** — non-recursive; `.mp4` `.mkv` `.mov` `.avi` `.m4v` `.webm` `.ts` `.mts`.
+1. **Browse** or paste a folder on the host — non-recursive; `.mp4` `.mkv` `.mov` `.avi` `.m4v` `.webm` `.ts` `.mts`.
 2. Check the cameras to publish. The ref camera does **not** have to be selected.
 3. On each camera, scrub or type `HH:MM:SS.mmm` at the same real-world event → **Set sync**. **Use as ref** on one camera.
-4. Turn on **Align cameras using sync marks**. Set **Start** and **End** (or load a preset).
+4. Turn on **Align cameras using sync marks**. Set **Start** and **End** on the aligned timeline (start `0` is the shared sync event). Or load a preset.
 5. Optional: timestamp overlay, **Publish IR**, resolution (UI default **720p**; Original 4K-copies when it can).
 6. **Start from here**. Copy the LAN URLs. In VLC use TCP: extra option `:rtsp-tcp`.
 7. **Create clip** writes `<folder>/<preset>/<camera>/<camera>.mp4` (and `_ir_thermal.mp4` if IR is on). Name or load a preset first.
@@ -133,16 +145,16 @@ While streams are running, most edit controls lock. **Seek all** restarts the sa
 Paths are the file stem. IR is the same stem with `_ir`:
 
 ```
-rtsp://192.168.1.44:8554/SITE1-channel-2
-rtsp://192.168.1.44:8554/SITE1-channel-2_ir
+rtsp://<host>:8554/SITE1-channel-2
+rtsp://<host>:8554/SITE1-channel-2_ir
 ```
 
-Use **RTSP over TCP**. 4K H.264 keyframes are shredded by UDP RTP fragmentation (connected stream, no picture).
+Copy the URLs from the foldable **RTSP URLs** block in the left nav. Use **RTSP over TCP**. 4K H.264 keyframes are shredded by UDP RTP fragmentation (connected stream, no picture).
 
 VLC:
 
 ```
-vlc --rtsp-tcp rtsp://192.168.1.44:8554/SITE1-channel-2
+vlc --rtsp-tcp rtsp://<host>:8554/SITE1-channel-2
 ```
 
 ---
@@ -202,7 +214,7 @@ Per video folder (created at runtime, not in git):
 
 RTSP Studio original source is licensed under the [Apache License 2.0](LICENSE). You may use it privately or commercially, modify it, redistribute it, and include it in other projects. The license includes an express patent grant. Keep the license and attribution notices. You do not have to publish source for your modifications.
 
-Copyright for this original code remains with the author.
+Copyright 2026 Vibhu.
 
 Third-party programs this project **runs** (not ships in git) keep their own licenses. See [NOTICE](NOTICE):
 
@@ -214,6 +226,6 @@ Third-party programs this project **runs** (not ships in git) keep their own lic
 | Python 3 | PSF | Interpreter |
 | DejaVu / similar fonts | Font package licenses | drawtext overlay |
 
-When you create the GitHub repository, set the repository license to **Apache-2.0**. GitHub will also detect it from the `LICENSE` file.
+This repository is licensed as **Apache-2.0**. GitHub detects that from the `LICENSE` file.
 
 Read [DISCLAIMER.md](DISCLAIMER.md) before using or redistributing RTSP Studio. It covers intended use, privacy, simulated IR, operational risk, and third-party components. This disclaimer does not change the Apache License 2.0.

@@ -12,12 +12,20 @@ Default RTSP: `rtsp://<host>:8554/<camera-stem>` over **TCP**
 ## Quick start
 
 ```bash
+git clone https://github.com/vibhubithar/rtsp-studio.git
+cd rtsp-studio
 ./install.sh
 ```
 
-`install.sh` starts the web UI as a background service. Open the printed URL, load a video folder, check the cameras to publish, set sync + trim, then **Start from here**. Use `./start-ui.sh` / `./stop-ui.sh` later.
+`install.sh` installs runtimes, fetches MediaMTX v1.13.1 into `vendor/mediamtx`, and starts the web UI as a background service (no terminal logs). Open the printed URL (`http://<host>:8787`), **Browse** a folder on the host, check the cameras to publish, set sync + trim, then **Start from here**.
 
-`install.sh` puts MediaMTX v1.13.1 in `vendor/mediamtx` and checks for Python 3.10+, ffmpeg/ffprobe (libx264 + drawtext), and a monospace TTF for overlays.
+```bash
+./start-ui.sh          # start or restart the UI service
+./stop-ui.sh           # stop the UI and RTSP publishers
+./stop-ui.sh --ui-only # stop the UI only; leave RTSP running
+```
+
+Logs: `journalctl --user -u rtsp-studio` or `.rtsp-state/logs/ui.log`.
 
 This is a Linux app (WSL2 can work). There is no native Windows build.
 
@@ -42,8 +50,18 @@ RTSP is TCP-only in practice. 4K keyframes do not survive UDP RTP fragmentation 
 Example:
 
 ```
-rtsp://192.168.1.44:8554/SITE1-channel-2
+rtsp://<host>:8554/SITE1-channel-2
 ```
+
+---
+
+## Web UI layout
+
+- **Left nav:** Video folder, Publish, and RTSP URLs (plus a short About). Each block folds. Drag the bar beside the nav to widen it. Width and fold state are remembered in the browser.
+- **Browse** walks directories on the **host** running the UI, not the machine with the browser.
+- **Feeds** (video grid) and the **trim** line stay open.
+- **Presets** under the trim line also fold.
+- Copy live paths from **RTSP URLs** in the left nav after Start.
 
 ---
 
@@ -54,7 +72,7 @@ Each tile is one camera: preview, per-camera scrub, ±1 frame, typed `HH:MM:SS.m
 1. Scrub (or type) to the **same real-world event** on every camera and press **Set sync**.
 2. Mark **one** camera as ref. The ref does **not** have to be selected as a published feed — it is only used for offset math.
 3. Turn on **Align cameras using sync marks**.
-4. Set the shared **Start** and **End** on the reference timeline. Other files shift by `(mark − ref mark)`.
+4. Set the shared **Start** and **End** on the aligned timeline. Start `0` is the shared sync event; other files shift by `(mark − ref mark)`.
 
 Click a preview to open the lightbox with the same three markers: start, sync, and end.
 
@@ -104,8 +122,8 @@ The overlay is shown on previews immediately. On **Start** it is burned into the
 IR always encodes. If color is Original (4K copy), IR is 720p so the host is not encoding 4K heatmaps.
 
 ```
-rtsp://192.168.1.44:8554/SITE1-channel-2
-rtsp://192.168.1.44:8554/SITE1-channel-2_ir
+rtsp://<host>:8554/SITE1-channel-2
+rtsp://<host>:8554/SITE1-channel-2_ir
 ```
 
 ---
@@ -124,8 +142,8 @@ Name or load a preset first. Output layout:
 Example:
 
 ```
-Santa-Clara-test-Videos/no-lights-round1/SITE1-channel-2/SITE1-channel-2.mp4
-Santa-Clara-test-Videos/no-lights-round1/SITE1-channel-2/SITE1-channel-2_ir_thermal.mp4
+videos/no-lights-round1/SITE1-channel-2/SITE1-channel-2.mp4
+videos/no-lights-round1/SITE1-channel-2/SITE1-channel-2_ir_thermal.mp4
 ```
 
 Resolution follows the dropdown: Original copies the color cut; 720p/1080p/480p scales. IR clips always encode (720p when Original is selected).
@@ -170,7 +188,7 @@ Audio is omitted from RTSP (video-only). Clips keep video and copy/encode audio 
 
 | Path | What |
 | --- | --- |
-| `.rtsp-state/` | PIDs, URLs, live UI session (`ui.json`) |
+| `.rtsp-state/` | PIDs, URLs, live UI session (`ui.json`), UI service log |
 | `<folder>/rtsp-sync.txt` | Sync marks + ref |
 | `<folder>/rtsp-presets.json` | Named start/end presets |
 | `<folder>/<preset>/<camera>/` | Exported clips |
@@ -181,7 +199,7 @@ Source recordings are never overwritten.
 
 ## Command line
 
-The UI calls `start.sh` / `stop.sh`. You can also publish without the browser:
+The UI service is `start-ui.sh` / `stop-ui.sh`. The UI calls `start.sh` / `stop.sh` to publish. You can also publish without the browser:
 
 ```bash
 ./start.sh /path/to/videos --res 720 --offset 90 --end 180 \
@@ -202,7 +220,7 @@ The UI calls `start.sh` / `stop.sh`. You can also publish without the browser:
 2. **Set sync** on each camera at the same event; **Use as ref** on one.
 3. Turn **Align** on. Set start and end (or load a preset).
 4. Optional: overlay, IR look, resolution.
-5. **Start from here** — copy the LAN RTSP URLs into the player (TCP).
+5. **Start from here** — copy LAN RTSP URLs from the left nav into the player (TCP).
 6. **Play** in the UI to preview the loop without touching RTSP.
 7. **Create clip** into `<preset>/<camera>/` when the window is right.
 8. **Jitter** or **Seek all** if a client needs a bump; **Stop** when done.

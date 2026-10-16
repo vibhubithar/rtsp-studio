@@ -42,7 +42,7 @@ Overlay forces a libx264 encode even when HEIGHT is omitted.
 --ir-style STYLE is thermal (heatmap) or night (green night vision).
 IR always encodes. If HEIGHT is omitted, IR is 720p so the color feed can stay 4K copy.
 
-  $0 /home/vibhu/Santa-Clara-test-Videos --res 720 --offset 90 --end 180 --only SITE1-channel-2.mp4
+  $0 /path/to/videos --res 720 --offset 90 --end 180 --only SITE1-channel-2.mp4
   $0 ... --mark SITE1-channel-2.mp4=120.5 --mark SITE1-channel-4.mp4=123.1 --ref SITE1-channel-2.mp4
 
 Environment (optional):
