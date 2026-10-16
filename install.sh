@@ -183,9 +183,14 @@ install_mediamtx() {
   if download "$checksums" "$tmp/checksums.sha256"; then
     (
       cd "$tmp"
-      if grep -F " $archive" checksums.sha256 | sha256sum -c -; then
-        :
-      else
+      # MediaMTX publishes GNU binary-mode lines: "<hash> *archive"
+      line="$(grep -F "$archive" checksums.sha256 || true)"
+      if [ -z "$line" ]; then
+        echo "MediaMTX checksum file has no entry for $archive" >&2
+        cat checksums.sha256 >&2
+        exit 1
+      fi
+      if ! printf '%s\n' "$line" | sha256sum -c -; then
         echo "MediaMTX checksum mismatch." >&2
         exit 1
       fi
