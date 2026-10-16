@@ -1038,8 +1038,8 @@
       const payload = {
         folder: folderEl.value.trim(),
         height: resEl.value,
-        offset: Number(slider.value) || 0,
-        end: Number(endSlider.value) || 0,
+        offset: toStoredOffset(Number(slider.value) || 0),
+        end: toStoredOffset(Number(endSlider.value) || 0),
         loop: loopEl.checked,
         align: alignEl.checked,
         selected: selectedNames().length ? selectedNames() : (savedSelected || []),
@@ -1103,8 +1103,8 @@
         runError.textContent = "Name the start/end preset first.";
         return;
       }
-      const start = Number(slider.value);
-      const end = Number(endSlider.value);
+      const start = toStoredOffset(Number(slider.value));
+      const end = toStoredOffset(Number(endSlider.value));
       if (!(end >= start + 0.5)) {
         runError.textContent = "End must be at least 0.5s after start.";
         return;
@@ -1125,10 +1125,11 @@
       const idx = Number(presetListEl.value);
       const row = presets[idx];
       if (!row) return;
+      applyRange();
       const min = Number(slider.min);
       const max = Number(slider.max);
-      slider.value = String(Math.min(max, Math.max(min, row.start)));
-      endSlider.value = String(Math.min(max, Math.max(min, row.end)));
+      slider.value = String(Math.min(max, Math.max(min, fromStoredOffset(row.start))));
+      endSlider.value = String(Math.min(max, Math.max(min, fromStoredOffset(row.end))));
       if (Number(endSlider.value) < Number(slider.value) + 0.5) {
         endSlider.value = String(Math.min(max, Number(slider.value) + 0.5));
       }
@@ -1214,10 +1215,23 @@
     }
 
     function timelineFromFile(name, fileT) {
-      if (!alignOn()) return fileT;
+      if (!alignOn() || syncMarks[name] == null) return Number(fileT);
+      return Number(fileT) - Number(syncMarks[name]);
+    }
+
+    function syncAnchor() {
+      if (!alignOn()) return 0;
       const ref = refName();
-      if (ref == null || syncMarks[name] == null || syncMarks[ref] == null) return fileT;
-      return fileT - (syncMarks[name] - syncMarks[ref]);
+      if (ref == null || syncMarks[ref] == null) return 0;
+      return Number(syncMarks[ref]);
+    }
+
+    function fromStoredOffset(stored) {
+      return Number(stored) - syncAnchor();
+    }
+
+    function toStoredOffset(timelineT) {
+      return Number(timelineT) + syncAnchor();
     }
 
     function paintMarkerSelect() {
@@ -1329,10 +1343,8 @@
     }
 
     function fileTime(name, timelineT) {
-      if (!alignOn()) return timelineT;
-      const ref = refName();
-      if (ref == null || syncMarks[name] == null || syncMarks[ref] == null) return timelineT;
-      return timelineT + (syncMarks[name] - syncMarks[ref]);
+      if (!alignOn() || syncMarks[name] == null) return Number(timelineT);
+      return Number(timelineT) + Number(syncMarks[name]);
     }
 
     function durationOf(name) {
@@ -1367,24 +1379,12 @@
         const durs = names.map(durationOf);
         return Math.max(0, Math.floor(Math.min(...durs) * 1000) / 1000);
       }
-      const ref = refName();
-      let tMax = Infinity;
-      names.forEach((n) => {
-        const delta = syncMarks[n] - syncMarks[ref];
-        tMax = Math.min(tMax, durationOf(n) - delta);
-      });
+      const tMax = Math.min(...names.map((n) => durationOf(n) - Number(syncMarks[n])));
       return Math.max(0, Math.floor(tMax * 1000) / 1000);
     }
 
     function selectedMin() {
-      if (!alignOn()) return 0;
-      const ref = refName();
-      let tMin = -Infinity;
-      selectedNames().forEach((n) => {
-        const delta = syncMarks[n] - syncMarks[ref];
-        tMin = Math.max(tMin, -delta);
-      });
-      return Math.max(0, Math.floor(tMin * 1000) / 1000);
+      return 0;
     }
 
     function paintSyncLabels() {
@@ -2046,10 +2046,10 @@
         const n = data.count ?? data.videos.length;
         probeStatus.textContent = n + " video(s) in folder. Check the ones to publish. " + names;
       }
-      if (data.offset != null && draggingSeek == null) slider.value = String(data.offset);
+      if (data.offset != null && draggingSeek == null) slider.value = String(fromStoredOffset(data.offset));
       applyRange();
       if (data.end != null && draggingSeek == null) {
-        endSlider.value = String(Math.min(Number(endSlider.max), data.end));
+        endSlider.value = String(Math.min(Number(endSlider.max), Math.max(Number(endSlider.min), fromStoredOffset(data.end))));
         setClocks();
       }
       sessionReady = true;
@@ -2152,8 +2152,8 @@
     async function startAtSlider(kind) {
       const folder = folderEl.value.trim();
       const files = selectedNames();
-      const startT = Number(slider.value);
-      const endT = Number(endSlider.value);
+      const startT = toStoredOffset(Number(slider.value));
+      const endT = toStoredOffset(Number(endSlider.value));
       const feedCount = files.length * (irEl.checked ? 2 : 1);
       runError.textContent = "";
       if (!files.length) {
@@ -2258,8 +2258,8 @@
     async function createClips() {
       const folder = folderEl.value.trim();
       const files = selectedNames();
-      const startT = Number(slider.value);
-      const endT = Number(endSlider.value);
+      const startT = toStoredOffset(Number(slider.value));
+      const endT = toStoredOffset(Number(endSlider.value));
       const preset = currentPresetName();
       runError.textContent = "";
       if (!files.length) {
@@ -2457,6 +2457,19 @@
       persistSession();
     });
     alignEl.addEventListener("change", () => {
+      const ref = refName();
+      const anchor = (ref != null && syncMarks[ref] != null) ? Number(syncMarks[ref]) : 0;
+      if (anchor) {
+        const start = Number(slider.value);
+        const end = Number(endSlider.value);
+        if (alignEl.checked) {
+          slider.value = String(start - anchor);
+          endSlider.value = String(end - anchor);
+        } else {
+          slider.value = String(start + anchor);
+          endSlider.value = String(end + anchor);
+        }
+      }
       persistSession();
       applyRange();
       refreshPreviews();
