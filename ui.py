@@ -1363,16 +1363,13 @@ class Handler(BaseHTTPRequestHandler):
                 origin = str(body.get("origin") or "").strip()
                 if overlay and origin:
                     parse_origin_unix(origin)
-                save_ui_session({
+                session_body = {
                     "folder": folder,
                     "height": height,
                     "offset": offset,
                     "end": end,
                     "loop": loop,
                     "selected": files,
-                    "marks": marks,
-                    "ref": ref,
-                    "align": bool(body.get("align")),
                     "seeks": body.get("seeks") or {},
                     "overlay": overlay,
                     "overlay_pos": overlay_pos,
@@ -1382,7 +1379,16 @@ class Handler(BaseHTTPRequestHandler):
                     "ir_style": ir_style,
                     "origin": origin,
                     "jitter": body.get("jitter"),
-                })
+                }
+                if marks:
+                    session_body["marks"] = marks
+                if ref:
+                    session_body["ref"] = ref
+                if "align" in body:
+                    session_body["align"] = bool(body.get("align"))
+                elif marks and ref:
+                    session_body["align"] = True
+                save_ui_session(session_body)
                 if not STREAM_LOCK.acquire(blocking=False):
                     raise RuntimeError("Start/stop already in progress")
                 try:
