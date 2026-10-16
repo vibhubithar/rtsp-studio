@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 <p align="center">
-  <img src="docs/banner.jpg" alt="RTSP Studio — turn a folder of camera recordings into live RTSP feeds" width="100%">
+  <img src="docs/banner.png" alt="RTSP Studio — from recorded videos to synchronized RTSP feeds for AI development, testing, and dataset creation" width="100%">
 </p>
 
 ### Why RTSP Studio?
@@ -188,7 +188,7 @@ rtsp-studio/
   DISCLAIMER.md       # responsible use
   LICENSE             # Apache License 2.0
   NOTICE              # copyright and third-party attribution
-  docs/banner.jpg     # GitHub README banner
+  docs/banner.png     # GitHub README banner
   vendor/mediamtx/    # created by install.sh (gitignored)
   .rtsp-state/        # live PIDs and session (gitignored)
 ```
