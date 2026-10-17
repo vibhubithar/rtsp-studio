@@ -45,7 +45,7 @@ Full feature list: [FEATURES.md](FEATURES.md) · Responsible use: [DISCLAIMER.md
 ```bash
 git clone https://github.com/vibhubithar/rtsp-studio.git
 cd rtsp-studio
-chmod +x install.sh start-ui.sh stop-ui.sh start.sh stop.sh ui.py
+chmod +x install.sh start.sh stop.sh ui.py
 ./install.sh
 ```
 
@@ -81,11 +81,11 @@ sudo apt-get install -y python3 ffmpeg fonts-dejavu-core curl ca-certificates ip
 On the **machine that should publish RTSP**, `./install.sh` starts the UI for you. To start or stop it later:
 
 ```bash
-./start-ui.sh
-./stop-ui.sh
+./start.sh
+./stop.sh
 ```
 
-`start-ui.sh` prints both localhost and LAN URLs, for example:
+`./start.sh` with no arguments starts the web UI and prints both localhost and LAN URLs, for example:
 
 ```
 RTSP Studio: http://127.0.0.1:8787
@@ -96,7 +96,7 @@ Open that URL from this machine or another on the LAN. **Browse** lists folders 
 
 The left nav (folder, publish, RTSP URLs, about) and presets are foldable. The video grid and trim line stay open. Drag the bar next to the left nav to widen it.
 
-`stop-ui.sh` stops the web UI and tears down ffmpeg/MediaMTX. Use **Stop** in the web UI (or `./stop.sh`) to stop publishers only. `./stop-ui.sh --ui-only` stops the web UI and leaves RTSP running.
+`./stop.sh` stops the web UI and tears down ffmpeg/MediaMTX. **Stop** in the web UI stops publishers only and leaves the UI running. `./stop.sh --ui-only` stops the web UI and leaves RTSP running. `./stop.sh --streams` is the same as the web Stop button.
 
 Logs: `journalctl --user -u rtsp-studio -n 50` or `.rtsp-state/logs/ui.log`.
 
@@ -104,8 +104,8 @@ Logs: `journalctl --user -u rtsp-studio -n 50` or `.rtsp-state/logs/ui.log`.
 
 ```bash
 git pull
-./stop-ui.sh --ui-only
-./start-ui.sh
+./stop.sh --ui-only
+./start.sh
 ```
 
 Then hard-refresh the browser. That restarts the UI only; it does not stop RTSP unless you omit `--ui-only`.
@@ -121,7 +121,7 @@ Then hard-refresh the browser. That restarts the UI only; it does not stop RTSP 
 | `MEDIAMTX_BIN` | `vendor/mediamtx/mediamtx` | MediaMTX binary |
 
 ```bash
-UI_PORT=9087 ./start-ui.sh
+UI_PORT=9087 ./start.sh
 ```
 
 ---
@@ -167,10 +167,10 @@ vlc --rtsp-tcp rtsp://<host>:8554/SITE1-channel-2
   --mark SITE1-channel-2.mp4=120.5 --ref SITE1-channel-2.mp4 \
   --overlay --ir --ir-style thermal
 
-./stop.sh
+./stop.sh --streams
 ```
 
-`./start.sh --help` lists overlay, IR, loop, and mark options.
+`./start.sh` with no arguments starts the UI. `./start.sh --help` lists overlay, IR, loop, and mark options. `./stop.sh` stops the UI and publishers; `--streams` stops publishers only.
 
 ---
 
@@ -179,10 +179,9 @@ vlc --rtsp-tcp rtsp://<host>:8554/SITE1-channel-2
 ```
 rtsp-studio/
   install.sh          # OS packages + MediaMTX + start UI service
-  start-ui.sh / stop-ui.sh  # web UI service
   ui.py               # web UI (port 8787)
   ui/index.html
-  start.sh / stop.sh  # MediaMTX + ffmpeg publishers
+  start.sh / stop.sh  # UI service, or MediaMTX + ffmpeg publishers
   mediamtx.yml
   FEATURES.md
   DISCLAIMER.md       # responsible use

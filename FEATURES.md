@@ -20,9 +20,10 @@ cd rtsp-studio
 `install.sh` installs runtimes, fetches MediaMTX v1.13.1 into `vendor/mediamtx`, and starts the web UI as a background service (no terminal logs). Open the printed URL (`http://<host>:8787`), **Browse** a folder on the host, check the cameras to publish, set sync + trim, then **Start from here**.
 
 ```bash
-./start-ui.sh          # start or restart the UI service
-./stop-ui.sh           # stop the UI and RTSP publishers
-./stop-ui.sh --ui-only # stop the UI only; leave RTSP running
+./start.sh             # start or restart the UI service
+./stop.sh              # stop the UI and RTSP publishers
+./stop.sh --ui-only    # stop the UI only; leave RTSP running
+./stop.sh --streams    # stop RTSP only; leave the UI running
 ```
 
 Logs: `journalctl --user -u rtsp-studio` or `.rtsp-state/logs/ui.log`.
@@ -199,7 +200,7 @@ Source recordings are never overwritten.
 
 ## Command line
 
-The UI service is `start-ui.sh` / `stop-ui.sh`. The UI calls `start.sh` / `stop.sh` to publish. You can also publish without the browser:
+`./start.sh` with no arguments is the UI service. With a video folder, it publishes RTSP (the web UI uses that form). `./stop.sh` stops both; the web Stop button calls `./stop.sh --streams`. You can also publish without the browser:
 
 ```bash
 ./start.sh /path/to/videos --res 720 --offset 90 --end 180 \

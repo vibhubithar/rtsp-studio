@@ -194,13 +194,9 @@ def save_ui_session(body: dict) -> dict:
         if folder and Path(folder).expanduser().is_dir():
             existing = {**load_sync(Path(folder).expanduser().resolve())["marks"], **existing}
         current["marks"] = {**existing, **incoming_marks}
-    if clear_marks:
+    if clear_marks or "ref" in body:
         ref = str(body.get("ref") or "").strip()
         current["ref"] = Path(ref).name if ref else None
-    elif "ref" in body:
-        ref = str(body.get("ref") or "").strip()
-        if ref:
-            current["ref"] = Path(ref).name
     if "seeks" in body and isinstance(body["seeks"], dict):
         current["seeks"] = {Path(str(key)).name: float(val) for key, val in body["seeks"].items()}
     if "overlay" in body:
@@ -220,7 +216,7 @@ def save_ui_session(body: dict) -> dict:
     if "jitter" in body and body["jitter"] not in (None, ""):
         current["jitter"] = parse_jitter_seconds(body["jitter"])
     (STATE / "ui.json").write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
-    should_write_sync = bool(clear_marks or incoming_marks)
+    should_write_sync = bool(clear_marks or incoming_marks or "ref" in body)
     if folder and Path(folder).expanduser().is_dir() and should_write_sync:
         save_sync(
             folder,
@@ -428,8 +424,11 @@ def merged_sync(folder: Path | None, session: dict) -> dict:
         saved = load_sync(folder)
     session_marks = _float_name_map(session.get("marks"))
     marks = {**saved["marks"], **session_marks} if session_marks else dict(saved["marks"])
-    session_ref = str(session.get("ref") or "").strip()
-    ref = Path(session_ref).name if session_ref else saved["ref"]
+    if "ref" in session:
+        session_ref = str(session.get("ref") or "").strip()
+        ref = Path(session_ref).name if session_ref else None
+    else:
+        ref = saved["ref"]
     if ref in {"", "-", "none"}:
         ref = None
     if "align" in session:
@@ -777,15 +776,23 @@ def start_streams(
 
 
 def stop_streams() -> dict:
+    # Never call ./stop.sh here: with no flags it also stops the UI service.
+    common = ROOT / "common.sh"
     result = subprocess.run(
-        [str(STOP)],
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; . "$1"; stop_all_streams',
+            "rtsp-stop-streams",
+            str(common),
+        ],
         cwd=str(ROOT),
         capture_output=True,
         text=True,
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "stop.sh failed").strip())
+        raise RuntimeError((result.stderr or result.stdout or "stop streams failed").strip())
     return {"message": (result.stdout or "Stopped.").strip().splitlines()[-1]}
 
 

@@ -22,8 +22,8 @@ MediaMTX, ffmpeg, or the timestamp font:
 
 Then starts the web UI as a background service (no terminal logs):
 
-  $SCRIPT_DIR/start-ui.sh
-  $SCRIPT_DIR/stop-ui.sh
+  $SCRIPT_DIR/start.sh
+  $SCRIPT_DIR/stop.sh
 
 Open the printed URL (this host, port 8787). Start/Stop in the web UI
 runs the RTSP publishers on this machine.
@@ -253,7 +253,7 @@ check_runtime() {
   else
     echo "MediaMTX: $VENDOR_DIR/mediamtx"
   fi
-  chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/stop.sh" "$SCRIPT_DIR/start-ui.sh" "$SCRIPT_DIR/stop-ui.sh" "$SCRIPT_DIR/ui.py" "$SCRIPT_DIR/install.sh" 2>/dev/null || true
+  chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/stop.sh" "$SCRIPT_DIR/ui.py" "$SCRIPT_DIR/install.sh" 2>/dev/null || true
   return "$failed"
 }
 
@@ -272,17 +272,17 @@ if [ "$START_UI" = 1 ]; then
   start_ui_service
   print_ui_urls
   echo "Start/Stop in the web UI still publishes RTSP from this host."
-  echo "Stop later with: $SCRIPT_DIR/stop-ui.sh"
+  echo "Stop later with: $SCRIPT_DIR/stop.sh"
 else
   cat <<EOF
 
 Ready. Start the UI on this machine:
 
-  $SCRIPT_DIR/start-ui.sh
+  $SCRIPT_DIR/start.sh
 
 The web UI listens on port 8787 (all interfaces). Start/Stop from any
 browser still publishes RTSP from this host. Stop with:
 
-  $SCRIPT_DIR/stop-ui.sh
+  $SCRIPT_DIR/stop.sh
 EOF
 fi

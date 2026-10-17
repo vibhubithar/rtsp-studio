@@ -5,15 +5,28 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 # shellcheck source=common.sh
 . "$SCRIPT_DIR/common.sh"
 
+if [ $# -eq 0 ]; then
+  start_ui_service
+  print_ui_urls
+  echo "Start/Stop in the web UI still publishes RTSP from this host."
+  exit 0
+fi
+
 VIDEO_EXTS='mp4|mkv|mov|avi|m4v|webm|ts|mts'
 
 usage() {
   cat <<EOF
-Usage: $0 <video-folder> [height]
+Usage: $0
+       $0 <video-folder> [height]
        $0 <video-folder> --res HEIGHT
 
-Starts MediaMTX and one looping RTSP publish per video file in the folder
-(non-recursive). RTSP path is the filename without extension.
+With no arguments, starts the web UI as a background service (no terminal
+logs). Open the printed URL. Start/Stop in the browser publishes RTSP
+from this host. Stop everything with: $SCRIPT_DIR/stop.sh
+
+With a video folder, starts MediaMTX and one looping RTSP publish per
+video file (non-recursive). RTSP path is the filename without extension.
+The web UI calls this form internally.
 
 HEIGHT is the output height in pixels: 480, 720, 1080, etc.
 720p and 1280x720 are also accepted. Aspect ratio is preserved.

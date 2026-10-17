@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared paths and stop logic for start.sh / stop.sh.
+# Shared paths and stop/start helpers for start.sh / stop.sh.
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${STATE_DIR:-$ROOT/.rtsp-state}"

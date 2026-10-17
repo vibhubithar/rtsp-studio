@@ -693,7 +693,7 @@
             <div class="row run-actions">
               <button id="start" type="button" disabled>Start from here</button>
               <button id="seek" class="ghost" type="button" disabled>Seek all</button>
-              <button id="stop" class="danger" type="button">Stop</button>
+              <button id="stop" class="danger" type="button" title="Stop RTSP streams only; the web UI stays up">Stop</button>
             </div>
             <div class="row" style="margin-top:8px">
               <label class="jitter-label" for="jitterSec">Jitter</label>
@@ -1411,9 +1411,9 @@
       const serverSeeks = (data.seeks && typeof data.seeks === "object") ? data.seeks : {};
       const hasServerMarks = Object.keys(serverMarks).length > 0;
       if (!Object.keys(syncMarks).length) restoreMarksFromLocal();
-      if (hasServerMarks) {
-        syncMarks = { ...syncMarks, ...serverMarks };
-        if (data.ref) syncRef = data.ref;
+      if (!marksDirty) {
+        if (hasServerMarks) syncMarks = { ...syncMarks, ...serverMarks };
+        if ("ref" in data) syncRef = data.ref || null;
       }
       if ("align" in data && (hasServerMarks || data.has_file || data.folder)) {
         alignEl.checked = !!data.align;
@@ -1725,7 +1725,6 @@
         const isRef = syncRef === name;
         if (refBtn) {
           refBtn.classList.toggle("sync-on", isRef);
-          refBtn.disabled = !!(syncRef && !isRef);
         }
       });
       const lbName = lightboxName;
@@ -1736,7 +1735,6 @@
       $("lightboxSaved").hidden = !marked;
       const isRef = syncRef === lbName;
       $("lightboxRef").classList.toggle("sync-on", isRef);
-      $("lightboxRef").disabled = !!(syncRef && !isRef);
     }
 
     function applyRange() {
