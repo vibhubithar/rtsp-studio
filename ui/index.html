@@ -1257,6 +1257,25 @@
       setControlLock();
     }
 
+    function shouldApplyPresets(data) {
+      if (!data || !Array.isArray(data.presets)) return false;
+      const incoming = data.folder || "";
+      if (!incoming) return false;
+      return !loadedFolder || sameFolder(incoming, loadedFolder);
+    }
+
+    async function loadPresetsFromFolder(folder) {
+      const path = String(folder || "").trim();
+      if (!path) {
+        applyPresets([]);
+        return;
+      }
+      try {
+        const data = await api("/api/presets?folder=" + encodeURIComponent(path));
+        if (Array.isArray(data.presets)) applyPresets(data.presets);
+      } catch (_) {}
+    }
+
     async function persistPresets() {
       const folder = folderEl.value.trim();
       if (!folder) throw new Error("Load a folder first");
@@ -2215,7 +2234,7 @@
       if (data.clip_progress) applyClipProgress(data.clip_progress);
       if (data.jitter != null && Number(data.jitter) > 0) jitterSecEl.value = String(data.jitter);
       if (data.next_clip) nextClip = Number(data.next_clip) || nextClip;
-      if (data.presets) applyPresets(data.presets);
+      if (shouldApplyPresets(data)) applyPresets(data.presets);
       if (data.selected && data.selected.length) savedSelected = data.selected;
       applySavedSync(data);
       if (data.videos && data.videos.length && (rebuild || !videoMeta.length || videosChanged(data.videos))) {
@@ -2293,10 +2312,12 @@
           loadedFolder = data.folder;
         }
         await applyProbe(data);
+        await loadPresetsFromFolder(data.folder || folderEl.value.trim());
         await persistSession(true, { replaceFolder: true });
       } catch (err) {
         probeStatus.textContent = err.message;
         renderGrid([]);
+        applyPresets([]);
         applyRange();
       } finally {
         setBusy(false);

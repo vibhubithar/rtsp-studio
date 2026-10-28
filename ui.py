@@ -609,9 +609,13 @@ def parse_presets(raw) -> list[dict]:
 def load_presets(folder: Path) -> list[dict]:
     path = folder / PRESETS_FILE
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
         return []
+    except (json.JSONDecodeError, OSError):
+        return []
+    if isinstance(data, dict):
+        data = data.get("presets")
     return parse_presets(data)
 
 
@@ -1354,15 +1358,13 @@ def status() -> dict:
         "origin": str(session.get("origin") or ""),
         "jitter": 2.0,
         "next_clip": 1,
-        "presets": [],
         "clip_progress": clip_progress(),
     }
     try:
         payload["jitter"] = parse_jitter_seconds(session.get("jitter", 2))
     except (TypeError, ValueError):
         payload["jitter"] = 2.0
-    if folder and Path(folder).expanduser().is_dir():
-        folder_path = Path(folder).expanduser().resolve()
+    if folder_path is not None:
         try:
             payload["next_clip"] = next_clip_number(folder_path)
         except OSError:
@@ -1418,6 +1420,14 @@ class Handler(BaseHTTPRequestHandler):
             folder = (parse_qs(parsed.query).get("path") or [""])[0]
             try:
                 self._send(200, browse_folder(folder))
+            except Exception as exc:
+                self._send(400, {"error": str(exc)})
+            return
+        if parsed.path == "/api/presets":
+            folder = (parse_qs(parsed.query).get("folder") or [""])[0]
+            try:
+                path = resolve_folder(folder)
+                self._send(200, {"presets": load_presets(path), "folder": str(path)})
             except Exception as exc:
                 self._send(400, {"error": str(exc)})
             return
