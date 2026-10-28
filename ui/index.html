@@ -456,49 +456,6 @@
       background: #000;
       border-radius: 10px;
     }
-    .picker-card {
-      width: min(640px, 100%);
-      max-height: calc(100vh - 48px);
-    }
-    .picker-path {
-      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-      color: var(--muted);
-      word-break: break-all;
-      margin: 0 0 10px;
-    }
-    .picker-list {
-      max-height: min(50vh, 420px);
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #0b0d08;
-      margin-top: 10px;
-    }
-    .picker-list button {
-      display: block;
-      width: 100%;
-      text-align: left;
-      background: transparent;
-      color: var(--ink);
-      border-radius: 0;
-      font-weight: 500;
-      border-bottom: 1px solid var(--line);
-    }
-    .picker-list button:hover,
-    .picker-list button:focus {
-      background: #1a1f14;
-    }
-    .picker-list .picker-file {
-      cursor: default;
-      font-weight: 400;
-      color: var(--muted);
-    }
-    .picker-list .picker-file:hover,
-    .picker-list .picker-file:focus {
-      background: transparent;
-    }
-    .picker-empty { margin: 0; padding: 16px; color: var(--muted); }
-    .picker-actions { margin-top: 12px; justify-content: flex-end; }
     .lightbox-controls { margin-top: 12px; }
     .lightbox-controls .sync-seek { padding: 0; }
     .lightbox-tools { margin-top: 10px; }
@@ -683,7 +640,7 @@
               <button id="browse" class="ghost" type="button">Browse</button>
               <button id="load" class="ghost" type="button">Load folder</button>
             </div>
-            <p id="probeStatus" class="hint">Browse folders on this server, or paste a server path, then Load folder.</p>
+            <p id="probeStatus" class="hint">Browse opens a folder dialog on this host. You can also paste a server path, then Load folder.</p>
           </div>
         </details>
 
@@ -838,25 +795,6 @@
       </div>
     </div>
   </main>
-  <div id="folderPicker" class="lightbox" hidden>
-    <div class="lightbox-backdrop" id="pickerBackdrop"></div>
-    <div class="lightbox-card picker-card" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
-      <div class="lightbox-head">
-        <strong id="pickerTitle">Server folder</strong>
-        <button id="pickerClose" class="ghost" type="button">Close</button>
-      </div>
-      <p id="pickerPath" class="picker-path"></p>
-      <div class="row">
-        <button id="pickerUp" class="ghost" type="button">Up</button>
-        <span id="pickerStatus" class="hint"></span>
-      </div>
-      <div id="pickerList" class="picker-list"></div>
-      <div class="row picker-actions">
-        <button id="pickerCancel" class="ghost" type="button">Cancel</button>
-        <button id="pickerUse" type="button">Use this folder</button>
-      </div>
-    </div>
-  </div>
   <div id="lightbox" class="lightbox" hidden>
     <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
     <div class="lightbox-card" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle">
@@ -949,6 +887,7 @@
     let jittering = false;
     let nextClip = 1;
     let sessionReady = false;
+    let loadedFolder = "";
     let lastPreviewKey = "";
     let playing = false;
     let playTimer = 0;
@@ -1246,6 +1185,14 @@
       return "rtspSync:" + folderEl.value.trim();
     }
 
+    function folderKey(path) {
+      return String(path || "").trim().replace(/\/+$/, "");
+    }
+
+    function sameFolder(a, b) {
+      return folderKey(a) === folderKey(b);
+    }
+
     function persistMarks() {
       marksDirty = true;
       marksEpoch += 1;
@@ -1274,11 +1221,16 @@
         jitter: Number(jitterSecEl.value) || 2,
       };
       const clear = !!(opts && opts.clearMarks);
+      const replace = !!(opts && opts.replaceFolder);
       if (clear) {
         payload.marks = {};
         payload.ref = null;
         payload.align = false;
         payload.clear_marks = true;
+      } else if (replace) {
+        payload.marks = syncMarks;
+        payload.ref = syncRef;
+        payload.replace_folder = true;
       } else if (marksDirty && (Object.keys(syncMarks).length || syncRef)) {
         payload.marks = syncMarks;
         payload.ref = syncRef;
@@ -1374,23 +1326,27 @@
 
     function persistSession(immediate, opts) {
       const folder = folderEl.value.trim();
-      if (!folder || running || !sessionReady || !videoMeta.length) return;
+      if (!folder || running || !sessionReady || !videoMeta.length) return Promise.resolve();
       localStorage.setItem(marksKey(), JSON.stringify({ marks: syncMarks, ref: syncRef, align: alignEl.checked }));
       localStorage.setItem("rtspFolder", folder);
       const send = () => {
         const payload = sessionPayload(opts);
         const epoch = marksEpoch;
-        api("/api/session", {
+        return api("/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         }).then(() => {
-          if ((payload.marks || payload.clear_marks) && epoch === marksEpoch) marksDirty = false;
+          if ((payload.marks || payload.clear_marks || payload.replace_folder) && epoch === marksEpoch) {
+            marksDirty = false;
+          }
         }).catch(() => {});
       };
       clearTimeout(sessionTimer);
-      if (immediate === true) send();
-      else sessionTimer = setTimeout(send, 250);
+      if (immediate === true) return send();
+      return new Promise((resolve) => {
+        sessionTimer = setTimeout(() => { send().then(resolve, resolve); }, 250);
+      });
     }
 
     function restoreMarksFromLocal() {
@@ -1797,7 +1753,6 @@
         if (el) el.disabled = locked;
       });
       $("browse").disabled = busy;
-      $("pickerUse").disabled = locked;
       slider.disabled = locked || noRange;
       endSlider.disabled = locked || noRange;
       $("lightboxSeek").disabled = locked;
@@ -2238,7 +2193,13 @@
       const rebuild = !!(opts && opts.rebuild);
       const refreshFrames = !!(opts && opts.refreshFrames);
       if (!data) return;
-      if (data.folder) folderEl.value = data.folder;
+      const incoming = data.folder || "";
+      if (loadedFolder && incoming && !sameFolder(incoming, loadedFolder)) {
+        if (data.clip_progress) applyClipProgress(data.clip_progress);
+        return;
+      }
+      const editingFolder = document.activeElement === folderEl;
+      if (incoming && !editingFolder) folderEl.value = incoming;
       if (data.height != null) resEl.value = String(data.height);
       if (data.loop === false) loopEl.checked = false;
       if (data.loop === true) loopEl.checked = true;
@@ -2262,6 +2223,9 @@
         renderGrid(data.videos);
         const n = data.count ?? data.videos.length;
         probeStatus.textContent = n + " video(s) in folder. Check the ones to publish.";
+        if (incoming) loadedFolder = incoming;
+      } else if (incoming && !loadedFolder) {
+        loadedFolder = incoming;
       }
       if (data.offset != null && draggingSeek == null) slider.value = String(fromStoredOffset(data.offset));
       applyRange();
@@ -2279,84 +2243,57 @@
       await applySharedState(data, { rebuild: true, refreshFrames: true });
     }
 
-    function pickerOpen() {
-      return !$("folderPicker").hidden;
-    }
-
-    function closeFolderPicker() {
-      $("folderPicker").hidden = true;
-    }
-
-    function pickerRow(label, className, onClick) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = label;
-      if (className) btn.className = className;
-      if (onClick) btn.addEventListener("click", onClick);
-      return btn;
-    }
-
-    async function refreshFolderPicker(path) {
-      $("pickerStatus").textContent = "Listing server…";
-      $("pickerList").innerHTML = "";
+    async function pickHostFolder() {
+      runError.textContent = "";
+      setBusy(true);
+      probeStatus.textContent = "Open the folder dialog on this host…";
       try {
-        const q = path ? "?path=" + encodeURIComponent(path) : "";
-        const data = await api("/api/browse" + q);
-        $("pickerPath").textContent = data.path;
-        $("pickerUp").disabled = !data.parent;
-        $("pickerUp").dataset.path = data.parent || "";
-        $("pickerUse").dataset.path = data.path;
-        const list = $("pickerList");
-        const dirs = data.dirs || [];
-        const files = data.files || [];
-        if (!dirs.length && !files.length) {
-          const empty = document.createElement("p");
-          empty.className = "picker-empty";
-          empty.textContent = "Empty folder.";
-          list.append(empty);
-        } else {
-          dirs.forEach((dir) => {
-            list.append(pickerRow(dir.name + "/", "", () => { refreshFolderPicker(dir.path); }));
-          });
-          files.forEach((file) => {
-            list.append(pickerRow(file.name, "picker-file"));
-          });
+        const data = await api("/api/pick-folder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: folderEl.value.trim() }),
+        });
+        if (data.cancelled) {
+          probeStatus.textContent = "Folder dialog cancelled.";
+          return;
         }
-        $("pickerStatus").textContent = files.length
-          ? files.length + " video file(s) on this server folder"
-          : "No video files in this server folder";
+        if (!data.path) throw new Error("No folder selected");
+        folderEl.value = data.path;
+        await loadFolder();
       } catch (err) {
-        $("pickerStatus").textContent = err.message;
+        probeStatus.textContent = err.message;
+      } finally {
+        setBusy(false);
       }
-    }
-
-    async function openFolderPicker() {
-      $("folderPicker").hidden = false;
-      await refreshFolderPicker(folderEl.value.trim());
-    }
-
-    async function usePickedFolder() {
-      const path = $("pickerUse").dataset.path;
-      if (!path) return;
-      folderEl.value = path;
-      closeFolderPicker();
-      await loadFolder();
     }
 
     async function loadFolder() {
       const folder = folderEl.value.trim();
       runError.textContent = "";
       if (!folder) {
-        await openFolderPicker();
+        await pickHostFolder();
         return;
       }
       stopPlayback();
       setBusy(true);
+      const previous = loadedFolder;
+      loadedFolder = folder;
+      if (!sameFolder(folder, previous)) {
+        savedSelected = null;
+        syncMarks = {};
+        syncRef = null;
+        localSeek = {};
+        marksDirty = false;
+      }
       probeStatus.textContent = "Reading video durations…";
       try {
         const data = await api("/api/probe?folder=" + encodeURIComponent(folder));
+        if (data.folder) {
+          folderEl.value = data.folder;
+          loadedFolder = data.folder;
+        }
         await applyProbe(data);
-        persistSession(true);
+        await persistSession(true, { replaceFolder: true });
       } catch (err) {
         probeStatus.textContent = err.message;
         renderGrid([]);
@@ -2747,15 +2684,7 @@
       refreshPreviews();
     });
     $("load").addEventListener("click", loadFolder);
-    $("browse").addEventListener("click", openFolderPicker);
-    $("pickerUp").addEventListener("click", () => {
-      const parent = $("pickerUp").dataset.path;
-      if (parent) refreshFolderPicker(parent);
-    });
-    $("pickerUse").addEventListener("click", usePickedFolder);
-    $("pickerClose").addEventListener("click", closeFolderPicker);
-    $("pickerCancel").addEventListener("click", closeFolderPicker);
-    $("pickerBackdrop").addEventListener("click", closeFolderPicker);
+    $("browse").addEventListener("click", pickHostFolder);
     $("start").addEventListener("click", () => startAtSlider("start"));
     $("seek").addEventListener("click", () => startAtSlider("seek"));
     $("stop").addEventListener("click", stopStreams);
@@ -2811,11 +2740,6 @@
     $("lightboxBackdrop").addEventListener("click", closeLightbox);
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if (pickerOpen()) {
-        e.preventDefault();
-        closeFolderPicker();
-        return;
-      }
       if (lightboxName) {
         e.preventDefault();
         closeLightbox();

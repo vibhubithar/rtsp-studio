@@ -59,7 +59,7 @@ rtsp://<host>:8554/SITE1-channel-2
 ## Web UI layout
 
 - **Left nav:** Video folder, Publish, and RTSP URLs (plus a short About). Each block folds. Drag the bar beside the nav to widen it. Width and fold state are remembered in the browser.
-- **Browse** walks directories on the **host** running the UI, not the machine with the browser.
+- **Browse** opens a system folder dialog on the **host** running the UI, not the machine with the browser.
 - **Feeds** (video grid) and the **trim** line stay open.
 - **Presets** under the trim line also fold.
 - Copy live paths from **RTSP URLs** in the left nav after Start.

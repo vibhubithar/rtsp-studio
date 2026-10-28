@@ -92,7 +92,7 @@ RTSP Studio: http://127.0.0.1:8787
              http://<host>:8787
 ```
 
-Open that URL from this machine or another on the LAN. **Browse** lists folders on the **host** (not the browser). Load a video folder, select cameras, set sync and trim, then **Start from here**.
+Open that URL from this machine or another on the LAN. **Browse** opens a folder dialog on the **host** (not the browser). Load a video folder, select cameras, set sync and trim, then **Start from here**.
 
 The left nav (folder, publish, RTSP URLs, about) and presets are foldable. The video grid and trim line stay open. Drag the bar next to the left nav to widen it.
 

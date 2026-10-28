@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -37,6 +38,7 @@ FRAME_JOBS = {}
 FRAME_JOBS_LOCK = threading.Lock()
 FRAME_JOB_GEN = {}
 STREAM_LOCK = threading.Lock()
+PICK_LOCK = threading.Lock()
 CLIP_LOCK = threading.Lock()
 CLIP_PROGRESS_LOCK = threading.Lock()
 CLIP_PROGRESS = {
@@ -169,9 +171,23 @@ def load_ui_session() -> dict:
 def save_ui_session(body: dict) -> dict:
     STATE.mkdir(parents=True, exist_ok=True)
     current = load_ui_session()
-    folder = str(body.get("folder") or current.get("folder") or "").strip()
+    prev_folder = str(current.get("folder") or "").strip()
+    incoming_folder = str(body.get("folder") or "").strip()
+    folder = incoming_folder or prev_folder
+    replace_folder = bool(body.get("replace_folder")) or (
+        bool(incoming_folder) and bool(prev_folder) and not folders_equal(incoming_folder, prev_folder)
+    )
     if folder:
         current["folder"] = folder
+    if replace_folder:
+        if "marks" not in body:
+            current["marks"] = {}
+        if "selected" not in body:
+            current["selected"] = []
+        if "ref" not in body:
+            current["ref"] = None
+        if "seeks" not in body:
+            current["seeks"] = {}
     if "height" in body:
         current["height"] = str(body.get("height") or "")
     if "offset" in body:
@@ -187,7 +203,7 @@ def save_ui_session(body: dict) -> dict:
         current["selected"] = [Path(str(name)).name for name in body["selected"]]
     clear_marks = bool(body.get("clear_marks"))
     incoming_marks = _float_name_map(body["marks"]) if "marks" in body else None
-    if clear_marks:
+    if clear_marks or (replace_folder and incoming_marks is not None):
         current["marks"] = incoming_marks or {}
     elif incoming_marks:
         existing = _float_name_map(current.get("marks"))
@@ -307,6 +323,21 @@ def resolve_folder(folder: str) -> Path:
     return path
 
 
+def folders_equal(a, b) -> bool:
+    left = str(a or "").strip()
+    right = str(b or "").strip()
+    if not left or not right:
+        return False
+    try:
+        pa = Path(left).expanduser()
+        pb = Path(right).expanduser()
+        if pa.is_dir() and pb.is_dir():
+            return pa.resolve() == pb.resolve()
+        return os.path.normpath(str(pa)) == os.path.normpath(str(pb))
+    except OSError:
+        return os.path.normpath(left) == os.path.normpath(right)
+
+
 def browse_folder(folder: str) -> dict:
     raw = (folder or "").strip()
     home = Path.home()
@@ -348,6 +379,96 @@ def browse_folder(folder: str) -> dict:
         "files": files,
         "videos": len(files),
     }
+
+
+def gui_env() -> dict:
+    env = os.environ.copy()
+    uid = os.getuid()
+    runtime = Path(env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}")
+    if runtime.is_dir():
+        env.setdefault("XDG_RUNTIME_DIR", str(runtime))
+        for name in ("wayland-0", "wayland-1"):
+            if (runtime / name).exists():
+                env.setdefault("WAYLAND_DISPLAY", name)
+                break
+    xa = Path(env.get("XAUTHORITY") or (Path.home() / ".Xauthority"))
+    if xa.is_file():
+        env["XAUTHORITY"] = str(xa)
+    if not env.get("DISPLAY"):
+        if Path("/tmp/.X11-unix/X0").exists():
+            env["DISPLAY"] = ":0"
+        elif Path("/tmp/.X11-unix/X1").exists():
+            env["DISPLAY"] = ":1"
+        else:
+            env["DISPLAY"] = ":0"
+    return env
+
+
+def _dialog_start_dir(start: str) -> str:
+    raw = (start or "").strip()
+    path = Path(raw).expanduser() if raw else Path.home()
+    try:
+        path = path.resolve()
+    except OSError:
+        path = Path.home()
+    if path.is_file():
+        path = path.parent
+    if not path.is_dir():
+        path = Path.home() if Path.home().is_dir() else Path("/")
+    return str(path)
+
+
+def pick_host_folder(start: str = "") -> dict:
+    if not PICK_LOCK.acquire(blocking=False):
+        raise RuntimeError("A folder dialog is already open on this host")
+    try:
+        initial = _dialog_start_dir(start)
+        env = gui_env()
+        title = "RTSP Studio video folder"
+        timeout = 300
+        commands = []
+        zenity = shutil.which("zenity")
+        if zenity:
+            commands.append([zenity, "--file-selection", "--directory", "--title=" + title, "--filename=" + initial.rstrip("/") + "/"])
+        kdialog = shutil.which("kdialog")
+        if kdialog:
+            commands.append([kdialog, "--title", title, "--getexistingdirectory", initial])
+        yad = shutil.which("yad")
+        if yad:
+            commands.append([yad, "--file-selection", "--directory", "--title=" + title, "--filename=" + initial.rstrip("/") + "/"])
+        last_err = "No folder dialog tool found (install zenity)."
+        for cmd in commands:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    check=False,
+                )
+            except FileNotFoundError:
+                continue
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("Folder dialog timed out") from None
+            if result.returncode != 0:
+                err = (result.stderr or "").strip()
+                if result.returncode in {1, 5} and not err:
+                    return {"cancelled": True, "path": ""}
+                last_err = err or f"{cmd[0]} exited {result.returncode}"
+                continue
+            picked = (result.stdout or "").strip().splitlines()
+            path = picked[-1].strip() if picked else ""
+            if not path:
+                return {"cancelled": True, "path": ""}
+            resolved = Path(path).expanduser()
+            if not resolved.is_dir():
+                raise ValueError(f"Not a directory: {path}")
+            return {"cancelled": False, "path": str(resolved.resolve())}
+        raise RuntimeError(last_err)
+    finally:
+        PICK_LOCK.release()
 
 
 def parse_sync_text(text: str) -> dict:
@@ -517,7 +638,10 @@ def probe_folder(folder: str) -> dict:
         raise ValueError(hint)
     CURRENT_FOLDER = path
     max_offset = min(v["duration"] for v in videos)
-    merged = merged_sync(path, load_ui_session())
+    session = load_ui_session()
+    if not folders_equal(session.get("folder"), str(path)):
+        session = {}
+    merged = merged_sync(path, session)
     PROBE_CACHE = {
         "folder": str(path),
         "count": len(videos),
@@ -1337,6 +1461,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid JSON"})
             return
         try:
+            if parsed.path == "/api/pick-folder":
+                self._send(200, pick_host_folder(str(body.get("path") or body.get("folder") or "").strip()))
+                return
             if parsed.path == "/api/start":
                 folder = str(body.get("folder") or "").strip()
                 height = str(body.get("height") or "").strip()

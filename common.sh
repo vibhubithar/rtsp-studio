@@ -157,6 +157,9 @@ WorkingDirectory=$ROOT
 Environment=PYTHONUNBUFFERED=1
 Environment=UI_HOST=$UI_HOST
 Environment=UI_PORT=$UI_PORT
+Environment=DISPLAY=${DISPLAY:-:0}
+Environment=WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+Environment=XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 ExecStart=$python_bin $ROOT/ui.py
 Restart=on-failure
 RestartSec=2
