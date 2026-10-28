@@ -970,6 +970,26 @@ def sanitize_preset_folder(name: str) -> str:
     return cleaned
 
 
+def sanitize_clip_alias(name: str) -> str:
+    raw = re.sub(r"\s+", " ", str(name or "").strip())[:40]
+    if not raw:
+        return ""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw)
+    cleaned = re.sub(r"-+", "-", cleaned).strip(".-")
+    if not cleaned or cleaned in {".", ".."}:
+        return ""
+    return cleaned
+
+
+def clip_output_name(stem: str, suffix: str, alias: str = "", ir_style: str | None = None) -> str:
+    parts = [stem]
+    if ir_style:
+        parts += ["ir", ir_style]
+    if alias:
+        parts.append(alias)
+    return "_".join(parts) + suffix
+
+
 def ir_video_filters(style: str, height: int | None) -> list[str]:
     out_h = height or 720
     filters = [f"scale=-2:{out_h}"]
@@ -1174,6 +1194,7 @@ def export_clips(
     align: bool = False,
     height: str | int | None = None,
     preset: str | None = None,
+    alias: str | None = None,
     ir: bool = False,
     ir_style: str | None = None,
 ) -> dict:
@@ -1186,6 +1207,7 @@ def export_clips(
     if end < offset + 0.5:
         raise ValueError("End time must be at least 0.5s after start.")
     preset_dir_name = sanitize_preset_folder(preset or "")
+    alias_suffix = sanitize_clip_alias(alias or "")
     dest_dir = path / preset_dir_name
     if dest_dir.resolve() == path.resolve() or path.resolve() not in dest_dir.resolve().parents:
         raise ValueError("invalid preset folder")
@@ -1229,13 +1251,13 @@ def export_clips(
             if dest_dir.resolve() not in cam_dir.resolve().parents:
                 raise ValueError("invalid camera folder")
             cam_dir.mkdir(parents=True, exist_ok=True)
-            color_dest = cam_dir / f"{src.stem}{src.suffix.lower()}"
+            color_dest = cam_dir / clip_output_name(src.stem, src.suffix.lower(), alias_suffix)
             note_file(f"{src.stem}/{color_dest.name}")
             cut_clip(src, color_dest, ss, ee - ss, out_height, on_progress=note_frac)
             written.append(str(color_dest))
             set_clip_progress(done=len(written), file_frac=0.0)
             if ir:
-                ir_dest = cam_dir / f"{src.stem}_ir_{ir_style}.mp4"
+                ir_dest = cam_dir / clip_output_name(src.stem, ".mp4", alias_suffix, ir_style)
                 note_file(f"{src.stem}/{ir_dest.name}")
                 cut_clip(
                     src, ir_dest, ss, ee - ss, None,
@@ -1599,6 +1621,7 @@ class Handler(BaseHTTPRequestHandler):
                 if height and not re.fullmatch(r"[0-9]+", height):
                     raise ValueError("invalid height")
                 preset = str(body.get("preset") or body.get("preset_name") or "").strip()
+                alias = str(body.get("alias") or "").strip()
                 ir = bool(body.get("ir"))
                 ir_style = normalize_ir_style(body.get("ir_style"))
                 if not CLIP_LOCK.acquire(blocking=False):
@@ -1606,7 +1629,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self._send(200, export_clips(
                         folder, offset, end, files, marks, ref, bool(body.get("align")), height,
-                        preset, ir, ir_style,
+                        preset, alias, ir, ir_style,
                     ))
                 finally:
                     CLIP_LOCK.release()

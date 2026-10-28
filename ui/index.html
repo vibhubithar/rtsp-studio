@@ -116,13 +116,57 @@
     .fold[open] > summary::before { content: "▾ "; }
     .fold-body { padding: 0 12px 12px; }
     .fold-body .run-actions { margin-top: 0; }
-    .fold-urls ul { margin: 0; }
-    .fold-urls li {
-      flex-wrap: wrap;
-      align-items: flex-start;
-      gap: 6px;
+    .url-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 8px;
     }
-    .fold-urls .url { font-size: 12px; }
+    .url-toolbar button { padding: 6px 10px; font-size: 12px; }
+    .url-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .url-table th,
+    .url-table td {
+      padding: 8px 0;
+      border-top: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .url-table thead th {
+      text-align: left;
+      font: 12px/1.45 "Segoe UI", system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      user-select: none;
+    }
+    .url-table td.url-cell {
+      color: var(--accent);
+      word-break: break-all;
+      user-select: text;
+      padding-right: 8px;
+    }
+    .url-table .url-ir {
+      display: inline-block;
+      margin-left: 6px;
+      color: var(--muted);
+      font: 500 11px/1 "Segoe UI", system-ui, sans-serif;
+      user-select: none;
+    }
+    .url-table td.url-copy {
+      width: 1%;
+      white-space: nowrap;
+      text-align: right;
+      vertical-align: middle;
+      user-select: none;
+    }
+    .url-table .url-empty {
+      color: var(--muted);
+      font-family: inherit;
+      user-select: none;
+    }
     .stage .fold { flex: 0 0 auto; }
     .stage .fold .preset-row { margin-top: 0; }
     body.sidebar-resizing { cursor: col-resize; user-select: none; }
@@ -148,6 +192,20 @@
     }
     .sidebar .overlay-opts select,
     .sidebar .overlay-opts .grow { flex: 1 1 auto; min-width: 0; width: 100%; }
+    .sidebar .folder-tools {
+      margin-top: 8px;
+      flex-wrap: nowrap;
+      align-items: flex-end;
+    }
+    .sidebar .folder-tools .grow {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .sidebar .folder-tools select {
+      width: 100%;
+      min-width: 0;
+    }
+    .sidebar .folder-tools .field { margin-bottom: 8px; }
     .sidebar .check { margin-top: 8px; }
     .run-actions { margin-top: 10px; }
     details.help { margin-top: 10px; color: var(--muted); font-size: 12px; }
@@ -597,17 +655,6 @@
     }
     .error { color: var(--danger); }
     .status.ok { color: var(--accent); }
-    ul { list-style: none; margin: 12px 0 0; padding: 0; }
-    li {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 8px 0;
-      border-top: 1px solid var(--line);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 13px;
-    }
-    .url { color: var(--accent); word-break: break-all; }
     .copy { background: transparent; color: var(--muted); padding: 0; font-weight: 500; }
   </style>
 </head>
@@ -630,17 +677,19 @@
             <div class="row">
               <input id="folder" type="text" spellcheck="false" placeholder="/path/to/videos" aria-label="Video folder">
             </div>
-            <div class="row" style="margin-top:8px">
-              <select id="res" aria-label="Output resolution">
-                <option value="">Original</option>
-                <option value="480">480p</option>
-                <option value="720" selected>720p</option>
-                <option value="1080">1080p</option>
-              </select>
+            <div class="row folder-tools">
+              <div class="grow">
+                <label class="field" for="res">Output resolution</label>
+                <select id="res">
+                  <option value="">Original</option>
+                  <option value="480">480p</option>
+                  <option value="720" selected>720p</option>
+                  <option value="1080">1080p</option>
+                </select>
+              </div>
               <button id="browse" class="ghost" type="button">Browse</button>
-              <button id="load" class="ghost" type="button">Load folder</button>
             </div>
-            <p id="probeStatus" class="hint">Browse opens a folder dialog on this host. You can also paste a server path, then Load folder.</p>
+            <p id="probeStatus" class="hint">Browse opens a folder dialog on this host and loads it. You can also paste a server path and press Enter.</p>
           </div>
         </details>
 
@@ -651,13 +700,6 @@
               <button id="start" type="button" disabled>Start from here</button>
               <button id="seek" class="ghost" type="button" disabled>Seek all</button>
               <button id="stop" class="danger" type="button" title="Stop RTSP streams only; the web UI stays up">Stop</button>
-            </div>
-            <div class="row" style="margin-top:8px">
-              <label class="jitter-label" for="jitterSec">Jitter</label>
-              <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
-              <span class="jitter-label">s</span>
-              <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
-              <button id="clip" class="ghost" type="button" disabled>Create clip</button>
             </div>
             <label class="check">
               <input id="loop" type="checkbox" checked>
@@ -727,10 +769,47 @@
           </div>
         </details>
 
+        <details class="fold" data-fold="jitter" open>
+          <summary>Jitter</summary>
+          <div class="fold-body">
+            <p class="hint">Stop running feeds for N seconds, then start them again from the same window.</p>
+            <div class="row" style="margin-top:8px">
+              <label class="jitter-label" for="jitterSec">Seconds</label>
+              <input id="jitterSec" class="jitter-sec" type="number" min="0.1" max="120" step="0.1" value="2" aria-label="Jitter seconds">
+              <button id="jitter" class="ghost" type="button" disabled>Jitter</button>
+            </div>
+          </div>
+        </details>
+
+        <details class="fold" data-fold="clips" open>
+          <summary>Create clips</summary>
+          <div class="fold-body">
+            <label class="field" for="clipAlias">Filename alias</label>
+            <div class="row">
+              <input id="clipAlias" type="text" maxlength="40" spellcheck="false" placeholder="optional suffix" aria-label="Clip filename alias">
+              <button id="clip" class="ghost" type="button" disabled>Create clip</button>
+            </div>
+            <p class="hint">Writes the current start→end cut of each selected camera into the preset folder. Alias is appended to each filename.</p>
+          </div>
+        </details>
+
         <details class="fold fold-urls" data-fold="urls" open>
           <summary>RTSP URLs</summary>
           <div class="fold-body">
-            <ul id="urls"><li>No streams running.</li></ul>
+            <div class="url-toolbar">
+              <button id="copyAllUrls" class="ghost" type="button" disabled>Copy all</button>
+            </div>
+            <table class="url-table">
+              <thead>
+                <tr>
+                  <th scope="col">URL</th>
+                  <th scope="col">Copy</th>
+                </tr>
+              </thead>
+              <tbody id="urls">
+                <tr><td class="url-empty" colspan="2">No streams running.</td></tr>
+              </tbody>
+            </table>
           </div>
         </details>
       </aside>
@@ -784,9 +863,8 @@
               <input id="presetName" type="text" maxlength="80" placeholder="Preset name" aria-label="Preset name">
               <button id="presetSave" class="ghost" type="button">Save start/end</button>
               <select id="presetList" aria-label="Saved start and end presets">
-                <option value="">Load preset…</option>
+                <option value="">Select preset…</option>
               </select>
-              <button id="presetLoad" class="ghost" type="button">Load</button>
               <button id="presetDelete" class="ghost" type="button">Delete</button>
               <button id="playClip" class="ghost play-clip" type="button" disabled>Play</button>
             </div>
@@ -855,13 +933,16 @@
     const jitterSecEl = $("jitterSec");
     const jitterEl = $("jitter");
     const clipEl = $("clip");
+    const clipAliasEl = $("clipAlias");
     const presetNameEl = $("presetName");
     const presetListEl = $("presetList");
     const probeStatus = $("probeStatus");
     const runStatus = $("runStatus");
     const runError = $("runError");
     const urlsEl = $("urls");
+    const copyAllUrlsEl = $("copyAllUrls");
     const grid = $("grid");
+    let streamUrls = [];
 
     let running = false;
     let busy = false;
@@ -1240,7 +1321,7 @@
 
     function renderPresetList() {
       const keep = presetListEl.value;
-      presetListEl.innerHTML = '<option value="">Load preset…</option>';
+      presetListEl.innerHTML = '<option value="">Select preset…</option>';
       presets.forEach((p, i) => {
         const opt = document.createElement("option");
         opt.value = String(i);
@@ -1757,16 +1838,16 @@
       originEl.disabled = locked;
       jitterSecEl.disabled = busy;
       jitterEl.disabled = busy || !running;
+      clipAliasEl.disabled = busy;
       clipEl.disabled = busy || noRange || selectedNames().length === 0;
       presetNameEl.disabled = locked;
       presetListEl.disabled = locked;
       $("presetSave").disabled = locked || noRange;
-      $("presetLoad").disabled = locked || !presetListEl.value;
       $("presetDelete").disabled = locked || !presetListEl.value;
       const canPlay = !busy && !noRange && previewImgs.length > 0;
       $("playClip").disabled = !canPlay && !playing;
       $("playLightbox").disabled = !canPlay && !playing;
-      ["load", "all", "none", "clearMarks", "startPrev", "startNext", "endPrev", "endNext",
+      ["all", "none", "clearMarks", "startPrev", "startNext", "endPrev", "endNext",
         "lightboxPrev", "lightboxNext", "lightboxSync", "lightboxRef"].forEach((id) => {
         const el = $(id);
         if (el) el.disabled = locked;
@@ -2153,34 +2234,55 @@
       previewTimer = setTimeout(refreshPreviews, 280);
     }
 
+    function markCopied(btn) {
+      const prev = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(() => { btn.textContent = prev; }, 1200);
+    }
+
+    async function copyText(text, btn) {
+      await navigator.clipboard.writeText(text);
+      if (btn) markCopied(btn);
+    }
+
     function renderUrls(urls) {
+      streamUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
       urlsEl.innerHTML = "";
-      if (!urls || !urls.length) {
-        urlsEl.innerHTML = "<li>No streams running.</li>";
+      copyAllUrlsEl.disabled = !streamUrls.length;
+      if (!streamUrls.length) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.className = "url-empty";
+        cell.colSpan = 2;
+        cell.textContent = "No streams running.";
+        row.append(cell);
+        urlsEl.append(row);
         return;
       }
-      urls.forEach((url) => {
-        const li = document.createElement("li");
-        const span = document.createElement("span");
-        span.className = "url";
-        span.textContent = url;
+      streamUrls.forEach((url) => {
+        const row = document.createElement("tr");
+        const urlCell = document.createElement("td");
+        urlCell.className = "url-cell";
+        const link = document.createElement("span");
+        link.className = "url";
+        link.textContent = url;
+        urlCell.append(link);
+        if (/_ir$/.test(url)) {
+          const tag = document.createElement("span");
+          tag.className = "url-ir";
+          tag.textContent = "IR";
+          urlCell.append(tag);
+        }
+        const copyCell = document.createElement("td");
+        copyCell.className = "url-copy";
         const btn = document.createElement("button");
         btn.className = "copy";
         btn.type = "button";
         btn.textContent = "Copy";
-        btn.addEventListener("click", async () => {
-          await navigator.clipboard.writeText(url);
-          btn.textContent = "Copied";
-          setTimeout(() => { btn.textContent = "Copy"; }, 1200);
-        });
-        li.append(span, btn);
-        if (/_ir$/.test(url)) {
-          const tag = document.createElement("span");
-          tag.className = "copy";
-          tag.textContent = "IR";
-          li.append(tag);
-        }
-        urlsEl.append(li);
+        btn.addEventListener("click", () => copyText(url, btn));
+        copyCell.append(btn);
+        row.append(urlCell, copyCell);
+        urlsEl.append(row);
       });
     }
 
@@ -2467,6 +2569,7 @@
           files,
           align: alignOn(),
           preset,
+          alias: clipAliasEl.value.trim(),
           ir: irEl.checked,
           ir_style: IR_STYLES.includes(irStyleEl.value) ? irStyleEl.value : "thermal",
         };
@@ -2680,13 +2783,13 @@
     $("presetSave").addEventListener("click", () => {
       saveCurrentPreset().catch((err) => { runError.textContent = err.message; });
     });
-    $("presetLoad").addEventListener("click", loadSelectedPreset);
     $("playClip").addEventListener("click", togglePlayback);
     $("playLightbox").addEventListener("click", togglePlayback);
     $("presetDelete").addEventListener("click", () => {
       deleteSelectedPreset().catch((err) => { runError.textContent = err.message; });
     });
     presetListEl.addEventListener("change", () => {
+      loadSelectedPreset();
       setControlLock();
     });
     document.querySelectorAll("[data-mode]").forEach((el) => {
@@ -2704,14 +2807,21 @@
       applyRange();
       refreshPreviews();
     });
-    $("load").addEventListener("click", loadFolder);
     $("browse").addEventListener("click", pickHostFolder);
     $("start").addEventListener("click", () => startAtSlider("start"));
     $("seek").addEventListener("click", () => startAtSlider("seek"));
     $("stop").addEventListener("click", stopStreams);
+    copyAllUrlsEl.addEventListener("click", () => {
+      if (!streamUrls.length) return;
+      copyText(streamUrls.join("\n"), copyAllUrlsEl);
+    });
     clipEl.addEventListener("click", createClips);
     folderEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") loadFolder();
+    });
+    folderEl.addEventListener("change", () => {
+      const folder = folderEl.value.trim();
+      if (folder && !sameFolder(folder, loadedFolder)) loadFolder();
     });
     window.addEventListener("pointerup", () => { draggingSeek = null; });
     window.addEventListener("pointercancel", () => { draggingSeek = null; });
